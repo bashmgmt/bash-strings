@@ -1,20 +1,4 @@
-use std::collections::HashMap;
 use std::fmt;
-
-/// The bash variable type. Determines how raw `@Q` output is parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BashType {
-    Scalar,
-    IndexedArray,
-    AssocArray,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum BashValue {
-    String(String),
-    IndexedArray(Vec<String>),
-    AssocArray(HashMap<String, String>),
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {

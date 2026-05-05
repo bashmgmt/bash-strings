@@ -1,9 +1,18 @@
-pub mod types;
-pub mod single_quoting;
-pub mod ansi_c_quoting;
-pub mod parse;
-pub mod encode;
+//! Three-tier bash value model:
+//!
+//! - `primitives/` — single-bash-word encode/parse + ParseError.
+//! - `raw.rs` — `BashRaw`: bash's three native variable shapes
+//!   (String/Array/AssocArray) with literal emit/parse and pack/unpack.
+//! - `value.rs` — `BashVal` + `Schema`: recursive Arr/Str model used by codecs.
+//! - `codec/` — `BashCodec` trait + `QuotedNest` + `LinkedArr` impls
+//!   mapping `BashVal` ↔ `BashRaw::Array` given a `Schema`.
 
-pub use types::{BashType, BashValue, ParseError};
-pub use parse::{parse_typed_value, parse_one_word};
-pub use encode::encode_scalar;
+pub mod primitives;
+pub mod raw;
+pub mod value;
+pub mod codec;
+
+pub use primitives::{ParseError, encode_scalar, parse_one_word, parse_words};
+pub use raw::{BashRaw, ConversionError};
+pub use value::{BashVal, Schema};
+pub use codec::{BashCodec, QuotedNest, LinkedArr, EmitError, CodecParseError};
