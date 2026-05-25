@@ -9,6 +9,7 @@
 
 pub mod primitives;
 pub mod raw;
+#[allow(clippy::module_inception)] // submodule mirrors the module's central concept
 pub mod value;
 pub mod codec;
 
