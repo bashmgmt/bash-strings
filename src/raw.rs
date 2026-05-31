@@ -160,6 +160,16 @@ impl BashRaw {
         Ok(Self::AssocArray(map))
     }
 
+    /// Parses `([k]='v' [k2]=v2 ...)` -- with and without
+    pub fn parse_assoc_righthandside(input: &str) -> Result<Self, ParseError> {
+        let pattern = regex::Regex::new(r"^\(.*\)$").unwrap();
+        let inner = match pattern.captures(input.trim()) {
+            Some(caps) => caps.get(0).unwrap().as_str(),
+            None => return Err(ParseError::InvalidFormat(format!("expected associative array literal with parentheses, but got: {input:?}"))),
+        };
+        
+    }
+
     /// Parse a bash literal array expression: `('w1' 'w2')` form.
     /// (Inverse of `to_bash_literal` for the `Array` variant.)
     pub fn parse_bash_literal_array(input: &str) -> Result<Self, ParseError> {
