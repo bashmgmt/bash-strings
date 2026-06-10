@@ -1,89 +1,60 @@
-use super::super::raw::BashRaw;
-use super::super::value::{BashVal, Schema};
+use super::super::tree::{BashVal, Schema};
 use super::{BashCodec, QuotedNest, LinkedArr};
 
 fn cmd(args: &[&str]) -> BashVal { BashVal::cmd(args.iter().copied()) }
 fn arr(es: Vec<BashVal>) -> BashVal { BashVal::Arr(es) }
-
-// ── QuotedNest ────────────────────────────────────────
+fn s(strs: &[&str]) -> Vec<String> { strs.iter().map(|s| s.to_string()).collect() }
 
 #[test]
 fn qn_emit_1d() {
-    let v = cmd(&["a", "b"]);
-    let raw = QuotedNest.emit(&v, &Schema::one_d()).unwrap();
-    assert_eq!(raw, BashRaw::Array(vec!["a".into(), "b".into()]));
+    assert_eq!(QuotedNest.emit(&cmd(&["a", "b"]), &Schema::n_d(1)).unwrap(), s(&["a", "b"]));
 }
 
 #[test]
 fn qn_emit_2d() {
     let v = arr(vec![cmd(&["a", "b"]), cmd(&["c", "d", "e"])]);
-    let raw = QuotedNest.emit(&v, &Schema::two_d()).unwrap();
-    // Each outer word is the inner's full bash literal — receiver can
-    // unpack via `declare -a inner="${outer[i]}"` in bash, no eval.
-    assert_eq!(raw, BashRaw::Array(vec!["('a' 'b')".into(), "('c' 'd' 'e')".into()]));
+    assert_eq!(QuotedNest.emit(&v, &Schema::n_d(2)).unwrap(),
+               s(&["('a' 'b')", "('c' 'd' 'e')"]));
 }
 
 #[test]
 fn qn_roundtrip_2d() {
     let v = arr(vec![cmd(&["AspectRequire", "env", "mod_a"]), cmd(&["Accumulate", "mod_b"])]);
-    let raw = QuotedNest.emit(&v, &Schema::two_d()).unwrap();
-    let back = QuotedNest.parse(&raw, &Schema::two_d()).unwrap();
-    assert_eq!(v, back);
+    let words = QuotedNest.emit(&v, &Schema::n_d(2)).unwrap();
+    assert_eq!(QuotedNest.parse(&words, &Schema::n_d(2)).unwrap(), v);
 }
-
-// ── LinkedArr ─────────────────────────────────────────
 
 #[test]
 fn la_emit_1d() {
-    let v = cmd(&["a", "b"]);
-    let raw = LinkedArr.emit(&v, &Schema::one_d()).unwrap();
-    assert_eq!(raw, BashRaw::Array(vec!["a".into(), "b".into()]));
+    assert_eq!(LinkedArr.emit(&cmd(&["a", "b"]), &Schema::n_d(1)).unwrap(), s(&["a", "b"]));
 }
 
 #[test]
 fn la_emit_2d() {
     let v = arr(vec![cmd(&["a", "b"]), cmd(&["c", "d", "e"])]);
-    let raw = LinkedArr.emit(&v, &Schema::two_d()).unwrap();
-    assert_eq!(raw, BashRaw::Array(vec![
-        "2".into(), "a".into(), "b".into(),
-        "3".into(), "c".into(), "d".into(), "e".into(),
-    ]));
+    assert_eq!(LinkedArr.emit(&v, &Schema::n_d(2)).unwrap(),
+               s(&["2", "a", "b", "3", "c", "d", "e"]));
 }
 
 #[test]
 fn la_emit_3d_one_outer() {
-    // [[[a,b],[c]]] — one outer; inner-2D = 5 words → outer prefix 5.
-    let v = arr(vec![
-        arr(vec![cmd(&["a", "b"]), cmd(&["c"])]),
-    ]);
-    let raw = LinkedArr.emit(&v, &Schema::n_d(3)).unwrap();
-    assert_eq!(raw, BashRaw::Array(vec![
-        "5".into(),
-            "2".into(), "a".into(), "b".into(),
-            "1".into(), "c".into(),
-    ]));
+    let v = arr(vec![arr(vec![cmd(&["a", "b"]), cmd(&["c"])])]);
+    assert_eq!(LinkedArr.emit(&v, &Schema::n_d(3)).unwrap(),
+               s(&["5", "2", "a", "b", "1", "c"]));
 }
 
 #[test]
 fn la_emit_3d_two_outers() {
-    // [[[a,b]],[[c]]] — two outers; inner-2D widths 3 and 2.
-    let v = arr(vec![
-        arr(vec![cmd(&["a", "b"])]),
-        arr(vec![cmd(&["c"])]),
-    ]);
-    let raw = LinkedArr.emit(&v, &Schema::n_d(3)).unwrap();
-    assert_eq!(raw, BashRaw::Array(vec![
-        "3".into(), "2".into(), "a".into(), "b".into(),
-        "2".into(), "1".into(), "c".into(),
-    ]));
+    let v = arr(vec![arr(vec![cmd(&["a", "b"])]), arr(vec![cmd(&["c"])])]);
+    assert_eq!(LinkedArr.emit(&v, &Schema::n_d(3)).unwrap(),
+               s(&["3", "2", "a", "b", "2", "1", "c"]));
 }
 
 #[test]
 fn la_roundtrip_2d() {
     let v = arr(vec![cmd(&["AspectRequire", "env", "mod_a"]), cmd(&["Accumulate", "mod_b"])]);
-    let raw = LinkedArr.emit(&v, &Schema::two_d()).unwrap();
-    let back = LinkedArr.parse(&raw, &Schema::two_d()).unwrap();
-    assert_eq!(v, back);
+    let w = LinkedArr.emit(&v, &Schema::n_d(2)).unwrap();
+    assert_eq!(LinkedArr.parse(&w, &Schema::n_d(2)).unwrap(), v);
 }
 
 #[test]
@@ -92,25 +63,6 @@ fn la_roundtrip_3d() {
         arr(vec![cmd(&["a", "b"]), cmd(&["c"])]),
         arr(vec![cmd(&["d", "e"])]),
     ]);
-    let raw = LinkedArr.emit(&v, &Schema::n_d(3)).unwrap();
-    let back = LinkedArr.parse(&raw, &Schema::n_d(3)).unwrap();
-    assert_eq!(v, back);
-}
-
-// ── BashRaw bash-literal roundtrip ────────────────────
-
-#[test]
-fn raw_literal_roundtrip_array() {
-    let raw = BashRaw::Array(vec!["foo bar".into(), "baz".into(), "".into()]);
-    let lit = raw.to_bash_literal();
-    let back = BashRaw::parse_bash_literal_array(&lit).unwrap();
-    assert_eq!(raw, back);
-}
-
-#[test]
-fn raw_pack_unpack_array() {
-    let raw = BashRaw::Array(vec!["a b".into(), "c".into()]);
-    let packed = raw.pack_as_string();
-    let unpacked = BashRaw::unpack_from_string(&packed).unwrap();
-    assert_eq!(raw, unpacked);
+    let w = LinkedArr.emit(&v, &Schema::n_d(3)).unwrap();
+    assert_eq!(LinkedArr.parse(&w, &Schema::n_d(3)).unwrap(), v);
 }

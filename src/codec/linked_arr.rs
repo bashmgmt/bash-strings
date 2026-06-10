@@ -11,26 +11,22 @@
 //! own nested prefixes):
 //!   1D `Arr(Scalar)`        [a, b]         → `(a b)`
 //!   2D `Arr(Arr(Scalar))`   [[a,b],[c,d,e]] → `(2 a b 3 c d e)`
-//!   3D `Arr^3(Scalar)`      [[[a,b],[c]]]   → `(5 2 a b 1 c)`        (one outer; inner-2D = 5 words)
-//!   3D `Arr^3(Scalar)`      [[[a,b]],[[c]]] → `(3 2 a b 2 1 c)`      (two outers; inner-2D widths 3 and 2)
+//!   3D `Arr^3(Scalar)`      [[[a,b],[c]]]   → `(5 2 a b 1 c)`
+//!   3D `Arr^3(Scalar)`      [[[a,b]],[[c]]] → `(3 2 a b 2 1 c)`
 //!
 //! Matches `glue-core/src/data/linked_arr.bash::LinkedArr__Add` /
 //! `LinkedArr__Call` semantics.
 
 use super::{BashCodec, EmitError, CodecParseError};
-use super::super::raw::BashRaw;
-use super::super::value::{BashVal, Schema};
+use super::super::tree::{BashVal, Schema};
 
 pub struct LinkedArr;
 
 impl BashCodec for LinkedArr {
-    fn emit(&self, val: &BashVal, schema: &Schema) -> Result<BashRaw, EmitError> {
+    fn emit(&self, val: &BashVal, schema: &Schema) -> Result<Vec<String>, EmitError> {
         match (val, schema) {
-            (BashVal::Str(s), Schema::Scalar) => Ok(BashRaw::String(s.clone())),
-            (BashVal::Arr(_), Schema::Arr(_)) => {
-                let words = emit_body(val, schema)?;
-                Ok(BashRaw::Array(words))
-            }
+            (BashVal::Str(s), Schema::Scalar) => Ok(vec![s.clone()]),
+            (BashVal::Arr(_), Schema::Arr(_)) => emit_body(val, schema),
             (BashVal::Str(_), Schema::Arr(_)) =>
                 Err(EmitError::SchemaMismatch { expected: "Arr", got: "Str" }),
             (BashVal::Arr(_), Schema::Scalar) =>
@@ -38,10 +34,13 @@ impl BashCodec for LinkedArr {
         }
     }
 
-    fn parse(&self, raw: &BashRaw, schema: &Schema) -> Result<BashVal, CodecParseError> {
-        match (raw, schema) {
-            (BashRaw::String(s), Schema::Scalar) => Ok(BashVal::Str(s.clone())),
-            (BashRaw::Array(words), Schema::Arr(_)) => {
+    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, CodecParseError> {
+        match schema {
+            Schema::Scalar => {
+                if words.len() != 1 { return Err(CodecParseError::ExpectedScalar); }
+                Ok(BashVal::Str(words[0].clone()))
+            }
+            Schema::Arr(_) => {
                 let (val, consumed) = parse_body(words, schema)?;
                 if consumed != words.len() {
                     return Err(CodecParseError::LayoutError(format!(
@@ -50,18 +49,10 @@ impl BashCodec for LinkedArr {
                 }
                 Ok(val)
             }
-            (BashRaw::String(_), Schema::Arr(_)) =>
-                Err(CodecParseError::NotArray { got: "String" }),
-            (BashRaw::Array(_), Schema::Scalar) =>
-                Err(CodecParseError::ExpectedScalar),
-            (BashRaw::AssocArray(_), _) =>
-                Err(CodecParseError::NotArray { got: "AssocArray" }),
         }
     }
 }
 
-/// Emit the body of an `Arr` level (no enclosing length prefix). The caller
-/// provides the prefix when nesting.
 fn emit_body(val: &BashVal, schema: &Schema) -> Result<Vec<String>, EmitError> {
     match (val, schema) {
         (BashVal::Str(s), Schema::Scalar) => Ok(vec![s.clone()]),
@@ -70,9 +61,7 @@ fn emit_body(val: &BashVal, schema: &Schema) -> Result<Vec<String>, EmitError> {
             let mut out = Vec::new();
             for e in elems {
                 let body = emit_body(e, inner)?;
-                if elem_is_arr {
-                    out.push(body.len().to_string());
-                }
+                if elem_is_arr { out.push(body.len().to_string()); }
                 out.extend(body);
             }
             Ok(out)
@@ -84,8 +73,6 @@ fn emit_body(val: &BashVal, schema: &Schema) -> Result<Vec<String>, EmitError> {
     }
 }
 
-/// Parse a slice of words as the body of an Arr at the given schema.
-/// Returns `(parsed_val, consumed_word_count)`.
 fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), CodecParseError> {
     match schema {
         Schema::Scalar => {
@@ -113,12 +100,11 @@ fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), Cod
                             words.len() - pos
                         )));
                     }
-                    let body = &words[pos..body_end];
-                    let (v, consumed) = parse_body(body, inner)?;
-                    if consumed != body.len() {
+                    let (v, consumed) = parse_body(&words[pos..body_end], inner)?;
+                    if consumed != body_end - pos {
                         return Err(CodecParseError::LayoutError(format!(
                             "nested group: consumed {consumed} of {} body words",
-                            body.len()
+                            body_end - pos
                         )));
                     }
                     elems.push(v);

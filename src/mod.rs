@@ -1,19 +1,25 @@
-//! Three-tier bash value model:
+//! Bash value primitives — parse and emit the RHS of bash assignments.
 //!
-//! - `primitives/` — single-bash-word encode/parse + ParseError.
-//! - `raw.rs` — `BashRaw`: bash's three native variable shapes
-//!   (String/Array/AssocArray) with literal emit/parse and pack/unpack.
-//! - `value.rs` — `BashVal` + `Schema`: recursive Arr/Str model used by codecs.
-//! - `codec/` — `BashCodec` trait + `QuotedNest` + `LinkedArr` impls
-//!   mapping `BashVal` ↔ `BashRaw::Array` given a `Schema`.
+//! Four typed value forms; each has a strict parser (accepting only bash's
+//! canonical output) and an emitter (producing canonical single-quoted form):
+//!
+//! | Form    | Wire shape                | Type                             |
+//! |---------|---------------------------|----------------------------------|
+//! | scalar  | `'foo'`                   | `String`                         |
+//! | q_words | `'a' 'b' 'c'`             | `Vec<String>`                    |
+//! | indexed | `([0]='a' [5]='b')`       | `IndexMap<usize, String>`        |
+//! | assoc   | `(['k']='v')`             | `IndexMap<String, String>`       |
+//!
+//! Recursive trees of strings live in [`BashVal`] + [`Schema`]; codecs
+//! ([`QuotedNest`], [`LinkedArr`]) flatten them into `Vec<String>` of bash
+//! words per a chosen layout.
 
-pub mod primitives;
-pub mod raw;
-#[allow(clippy::module_inception)] // submodule mirrors the module's central concept
-pub mod value;
+pub mod tree;
 pub mod codec;
+pub mod parser;
+pub mod emit;
 
-pub use primitives::{ParseError, encode_scalar, parse_one_word, parse_words};
-pub use raw::{BashRaw, ConversionError};
-pub use value::{BashVal, Schema};
+pub use tree::{BashVal, Schema};
 pub use codec::{BashCodec, QuotedNest, LinkedArr, EmitError, CodecParseError};
+pub use parser::{parse_scalar, parse_q_words, parse_indexed, parse_assoc, ParseError};
+pub use emit::{emit_scalar, emit_q_words, emit_indexed, emit_assoc};
