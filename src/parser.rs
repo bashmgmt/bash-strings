@@ -5,8 +5,8 @@
 //!
 //! Adjacent forms concatenate: `a"b"c'd'$'e'` → `abcde`. Each word ends at
 //! a context-defined stop char (whitespace, `)`, `]`, ...). Stops are
-//! passed to [`word`] explicitly; the typed entry points use the canonical
-//! [`VALUE_STOPS`] / [`KEY_STOPS`].
+//! passed to `word` explicitly; the typed entry points use the canonical
+//! `VALUE_STOPS` / `KEY_STOPS`.
 
 use std::fmt;
 use indexmap::IndexMap;

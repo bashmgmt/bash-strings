@@ -11,7 +11,7 @@
 //!
 //! Both are guided by a [`Schema`] tree mirroring `BashVal` depth. Scalar
 //! leaves are RAW strings; the consumer applies bash quoting via
-//! [`emit_q_words`](super::emit_q_words) when constructing an assignment.
+//! [`emit_q_words`] when constructing an assignment.
 
 use std::fmt;
 

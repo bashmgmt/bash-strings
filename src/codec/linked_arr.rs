@@ -9,10 +9,10 @@
 //!
 //! Examples (each prefix counts the FULL inner word stream including its
 //! own nested prefixes):
-//!   1D `Arr(Scalar)`        [a, b]         → `(a b)`
-//!   2D `Arr(Arr(Scalar))`   [[a,b],[c,d,e]] → `(2 a b 3 c d e)`
-//!   3D `Arr^3(Scalar)`      [[[a,b],[c]]]   → `(5 2 a b 1 c)`
-//!   3D `Arr^3(Scalar)`      [[[a,b]],[[c]]] → `(3 2 a b 2 1 c)`
+//!   1D `Arr(Scalar)`        `[a, b]`          → `(a b)`
+//!   2D `Arr(Arr(Scalar))`   `[[a,b],[c,d,e]]` → `(2 a b 3 c d e)`
+//!   3D `Arr^3(Scalar)`      `[[[a,b],[c]]]`   → `(5 2 a b 1 c)`
+//!   3D `Arr^3(Scalar)`      `[[[a,b]],[[c]]]` → `(3 2 a b 2 1 c)`
 //!
 //! Matches `glue-core/src/data/linked_arr.bash::LinkedArr__Add` /
 //! `LinkedArr__Call` semantics.
