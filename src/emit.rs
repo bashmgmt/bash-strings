@@ -17,35 +17,21 @@ pub fn emit_scalar(s: &str) -> String {
 }
 
 pub fn emit_q_words(words: &[String]) -> String {
-    let mut out = String::new();
-    for (i, w) in words.iter().enumerate() {
-        if i > 0 { out.push(' '); }
-        out.push_str(&emit_scalar(w));
-    }
-    out
+    words.iter().map(|word| emit_scalar(word)).collect::<Vec<_>>().join(" ")
 }
 
 pub fn emit_indexed(m: &IndexMap<usize, String>) -> String {
-    let mut out = String::from("(");
-    for (i, (k, v)) in m.iter().enumerate() {
-        if i > 0 { out.push(' '); }
-        out.push_str(&format!("[{k}]={}", emit_scalar(v)));
-    }
-    out.push(')');
-    out
+    literal(m.iter().map(|(key, value)| format!("[{key}]={}", emit_scalar(value))))
 }
 
 pub fn emit_assoc(m: &IndexMap<String, String>) -> String {
-    let mut out = String::from("(");
-    for (i, (k, v)) in m.iter().enumerate() {
-        if i > 0 { out.push(' '); }
-        out.push('[');
-        out.push_str(&emit_scalar(k));
-        out.push_str("]=");
-        out.push_str(&emit_scalar(v));
-    }
-    out.push(')');
-    out
+    literal(
+        m.iter().map(|(key, value)| format!("[{}]={}", emit_scalar(key), emit_scalar(value))),
+    )
+}
+
+fn literal(pairs: impl IntoIterator<Item = String>) -> String {
+    format!("({})", pairs.into_iter().collect::<Vec<_>>().join(" "))
 }
 
 fn needs_ansi_c(s: &str) -> bool {
@@ -80,7 +66,7 @@ fn ansi_c(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::value::parser::{parse_scalar, parse_q_words, parse_indexed, parse_assoc};
+    use crate::bash::value::parser::{parse_assoc, parse_indexed, parse_q_words, parse_scalar};
 
     fn ix<I: IntoIterator<Item = (usize, &'static str)>>(it: I) -> IndexMap<usize, String> {
         it.into_iter().map(|(k, v)| (k, v.to_string())).collect()

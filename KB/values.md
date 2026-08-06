@@ -1,85 +1,82 @@
-# Values — bash's own formats, decoded
+# Values — bash's own quoted forms
 
-`src/bash/value/`
+`src/bash/value/` — `parser.rs`, `emit.rs`, `codec.rs`
 
-Bash can already serialise its data. `${v@Q}` quotes a scalar so bash can read
-it back; `${v[*]@Q}` does the same for each element of an array; `${v[*]@A}`
-emits a complete `declare` statement, attributes included. This layer is the
-Rust side of those forms, and nothing above it invents a format of its own.
+The Rust side of the format bash already has.
 
-## Four shapes, four parsers
+## Four forms
 
-```rust
-pub fn parse_scalar(s: &str)  -> Result<String, ParseError>;                     // 'foo'
-pub fn parse_q_words(s: &str) -> Result<Vec<String>, ParseError>;                // 'a' 'b' 'c'
-pub fn parse_indexed(s: &str) -> Result<IndexMap<usize, String>, ParseError>;    // ([0]='a' [5]='b')
-pub fn parse_assoc(s: &str)   -> Result<IndexMap<String, String>, ParseError>;   // (['k']='v')
-```
-
-with the exact inverses in `emit.rs`:
+| form | shape | type | produced by bash as |
+|---|---|---|---|
+| scalar | `'foo'` | `String` | `"${x@Q}"` |
+| q_words | `'a' 'b' 'c'` | `Vec<String>` | `"${arr[*]@Q}"` |
+| indexed | `([0]='a' [5]='b')` | `IndexMap<usize, String>` | `declare -p`, `@A` |
+| assoc | `(['k']='v')` | `IndexMap<String, String>` | `declare -p`, `@A` |
 
 ```rust
-pub fn emit_scalar(s: &str) -> String;
+pub fn parse_scalar(s: &str)  -> Result<String, ParseError>;
+pub fn parse_q_words(s: &str) -> Result<Vec<String>, ParseError>;
+pub fn parse_indexed(s: &str) -> Result<IndexMap<usize, String>, ParseError>;
+pub fn parse_assoc(s: &str)   -> Result<IndexMap<String, String>, ParseError>;
+
+pub fn emit_scalar(s: &str)           -> String;
 pub fn emit_q_words(words: &[String]) -> String;
 pub fn emit_indexed(m: &IndexMap<usize, String>) -> String;
-pub fn emit_assoc(m: &IndexMap<String, String>) -> String;
+pub fn emit_assoc(m: &IndexMap<String, String>)  -> String;
 ```
 
-The parsers are **strict**: they accept what bash emits, not everything bash
-would accept. That is deliberate — the input always comes from bash, so
-leniency would only hide a bug on our side. `ParseError` carries the input and
-a byte offset:
+Parsers accept bash's canonical output and nothing else; emitters produce
+canonical single-quoted form. `$'…'` ANSI-C strings are accepted on input,
+which is how a value containing a newline or a tab survives: bash emits that
+form for them, so a delimiter inside a value never resembles the frame around
+it.
 
-```rust
-pub struct ParseError { /* … */ }
-impl ParseError {
-    pub fn new(input: &str, at: usize, message: impl Into<String>) -> Self;
-}
-```
+Insertion order is preserved (`IndexMap`), because a snapshot read back should
+list variables in the order bash reported them.
 
-`IndexMap` rather than `HashMap` because bash's own iteration order is the
-only order these have, and losing it would make output unstable for no gain.
-Indexed arrays are `IndexMap<usize, _>` rather than `Vec` because bash arrays
-are sparse: `a=([0]=x [5]=y)` is three elements short of a five-element `Vec`
-and pretending otherwise loses the index.
+All four are the crate's contract with bash, and the round trips are the
+strongest test of the parsers `bashcap` depends on, whether or not a given
+direction currently has a caller.
 
-### What a word can be
+## Trees and codecs
 
-`${v@Q}` produces one of four forms per word, and `parse_q_words` handles all
-of them plus their concatenation:
-
-| form | example |
-|---|---|
-| single-quoted | `'hello world'` |
-| ANSI-C quoted | `$'two\nlines'` — used whenever the value contains a newline |
-| backslash-escaped | `\$` |
-| bare | `plain` |
-
-The ANSI-C case is why a message is always one line: bash never emits a raw
-newline inside `@Q` output, so line-oriented framing is sound. See
-[wire.md](wire.md#frames).
-
-## Trees, and the two codecs
-
-Bash arrays are flat. Anything nested has to be encoded textually, and there
-are two reasonable ways to do it. Both are described by a `Schema` that
-mirrors the value's depth:
+`codec.rs` holds the recursive value, its depth, and the two ways to flatten
+one — one subject, since a codec is meaningless without them.
 
 ```rust
 pub enum BashVal { Str(String), Arr(Vec<BashVal>) }
 pub enum Schema  { Scalar, Arr(Box<Schema>) }
 
-impl Schema {
-    pub fn n_d(n: usize) -> Self;   // n_d(2) == Arr(Arr(Scalar))
+impl Schema { pub fn n_d(n: usize) -> Self; }   // n_d(2) == Arr(Arr(Scalar))
+
+impl BashVal {
+    pub fn row(words: impl IntoIterator<Item = impl Into<String>>) -> Self;
+    pub fn words(self) -> Option<Vec<String>>;       // one-dimensional
+    pub fn rows(self)  -> Option<Vec<Vec<String>>>;  // two-dimensional
 }
 
 pub trait BashCodec {
-    fn emit(&self, val: &BashVal, schema: &Schema) -> Result<Vec<String>, EmitError>;
+    fn emit(&self, val: &BashVal) -> Vec<String>;
     fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, CodecParseError>;
-    fn emit_literal(&self, val: &BashVal, schema: &Schema) -> Result<String, EmitError>;
+
+    fn emit_literal(&self, val: &BashVal) -> String;
     fn parse_literal(&self, input: &str, schema: &Schema) -> Result<BashVal, CodecParseError>;
+
+    fn words(&self, input: &str) -> Result<Vec<String>, CodecParseError>;
+    fn rows(&self, input: &str)  -> Result<Vec<Vec<String>>, CodecParseError>;
 }
 ```
+
+A bash array is flat, so nesting is encoded textually and the depth is carried
+by a `Schema` alongside the data.
+
+`emit` takes no `Schema`: the value's own depth decides the encoding, so there
+is nothing to disagree with and nothing to fail. `parse` needs one, because
+the text alone does not say how many layers of quoting to peel.
+
+`words` and `rows` are `parse_literal` at `n_d(1)` and `n_d(2)` with the tree
+already walked back down to strings — the two depths every caller in the crate
+asks for. A `BashVal` is worth holding for deeper or irregular shapes.
 
 **`QuotedNest`** makes each inner array one quoted word at the outer level:
 
@@ -87,32 +84,19 @@ pub trait BashCodec {
 [[a, b], [c]]   →   ("('a' 'b')" "('c')")
 ```
 
-The receiver unquotes one layer per level. This is what the rig uses, because
-bash reconstructs a level with `declare -a inner="$word"` — its own parser,
-no `eval` — and Rust reconstructs it with `parse_literal`. Depth costs one
-parse per level and nothing else, which is why a bashcap snapshot can carry
-frames, state, vars and notes as structure rather than flattening them behind
-sentinels.
+Bash reconstructs a level with `declare -a inner="$word"`, its own parser, and
+Rust with `words`. Depth costs one parse per level. This is what the rig uses.
 
-**`LinkedArr`** prefixes each group with its width instead:
+**`LinkedArr`** prefixes each group with its width:
 
 ```
 [[a, b], [c]]   →   (2 a b 1 c)
 ```
 
 Denser, and it matches `glue-core/src/data/linked_arr.bash` on the ManageBash
-side, which is the reason it exists. Nothing in the rig uses it.
-
-## Where it is used
-
-| caller | what for |
-|---|---|
-| `wire::Record::parse_message` | one message, `QuotedNest` at `n_d(1)` |
-| `bashcap::entry` | each snapshot section, `n_d(1)` or `n_d(2)` |
-| `codegen`, `run` | `emit_scalar` for every path and literal baked into the prelude |
-| `resolve::cli` | `LinkedArr`, for the ManageBash resolver protocol |
+side, which is its only consumer.
 
 ## See also
 
-- [wire.md](wire.md) — the message format built on `QuotedNest`
-- `src/bash/value/codec/tests.rs` — round-trip proofs for both codecs
+- [wire.md](wire.md#messages) — the one message format, built on `QuotedNest`
+- [bashcap.md](bashcap.md#the-decoder) — the deepest use, at `n_d(2)`
