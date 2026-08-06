@@ -23,9 +23,7 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn new(input: &str, at: usize, message: impl Into<String>) -> Self {
-        let lo = at.saturating_sub(20);
-        let hi = (at + 20).min(input.len());
-        Self { message: message.into(), at, snippet: input.get(lo..hi).unwrap_or("").to_string() }
+        Self { message: message.into(), at, snippet: around(input, at) }
     }
     fn from_winnow<E: fmt::Display>(input: &str, at: usize, err: E) -> Self {
         Self::new(input, at, err.to_string())
@@ -41,7 +39,29 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-pub(crate) const VALUE_STOPS: &[char] = &[' ', '\t', '\n', ')'];
+/// A refusal that ends the parse. Once a quoted form's opener is read there
+/// is only one way to finish it, so there is nothing to back off to — unlike
+/// a bare segment, which `word` retries.
+fn cut() -> ErrMode<ContextError> {
+    ErrMode::Cut(ContextError::new())
+}
+
+/// The text around an offset, widened to character boundaries — so a snippet
+/// is still a snippet when the input holds multi-byte characters.
+fn around(input: &str, at: usize) -> String {
+    let mut lo = at.saturating_sub(20).min(input.len());
+    let mut hi = (at + 20).min(input.len());
+
+    while !input.is_char_boundary(lo) {
+        lo -= 1;
+    }
+    while !input.is_char_boundary(hi) {
+        hi += 1;
+    }
+    input[lo..hi].to_string()
+}
+
+const VALUE_STOPS: &[char] = &[' ', '\t', '\n', ')'];
 pub(crate) const KEY_STOPS:   &[char] = &[']'];
 
 pub fn parse_scalar(s: &str) -> Result<String, ParseError> {
@@ -123,9 +143,12 @@ fn assoc_compound(input: &mut &str) -> winnow::ModalResult<IndexMap<String, Stri
 
 fn bracket_index(input: &mut &str) -> winnow::ModalResult<usize> {
     "[".parse_next(input)?;
-    let s: &str = take_while(1.., |c: char| c.is_ascii_digit()).parse_next(input)?;
+    let digits: &str = take_while(1.., |c: char| c.is_ascii_digit()).parse_next(input)?;
     "]".parse_next(input)?;
-    Ok(s.parse().unwrap())
+
+    // A bash subscript is a machine integer. One too wide to be one was not
+    // printed by bash, so it is rejected rather than wrapped or truncated.
+    digits.parse().map_err(|_| cut())
 }
 
 pub(crate) fn word(stops: &[char], input: &mut &str) -> winnow::ModalResult<String> {
@@ -171,18 +194,21 @@ fn double_quoted(input: &mut &str) -> winnow::ModalResult<String> {
     "\"".parse_next(input)?;
     let mut out = String::new();
     loop {
-        if input.is_empty() { return Err(ErrMode::Cut(ContextError::new())); }
-        if input.starts_with('"') { *input = &input[1..]; return Ok(out); }
-        if let Some(rest) = input.strip_prefix('\\') {
+        // Reading the character is what says there is one, so the body below
+        // never has to ask again.
+        let Some(c) = input.chars().next() else { return Err(cut()) };
+
+        if c == '"' { *input = &input[1..]; return Ok(out); }
+        if c == '\\' {
+            let rest = &input[1..];
             match rest.chars().next() {
                 Some(c @ ('$' | '"' | '\\' | '`')) => { out.push(c); *input = &rest[c.len_utf8()..]; }
                 Some('\n') => { *input = &rest[1..]; }
                 Some(c) => { out.push('\\'); out.push(c); *input = &rest[c.len_utf8()..]; }
-                None => return Err(ErrMode::Cut(ContextError::new())),
+                None => return Err(cut()),
             }
             continue;
         }
-        let c = input.chars().next().unwrap();
         out.push(c);
         *input = &input[c.len_utf8()..];
     }
@@ -192,15 +218,17 @@ fn single_ansi_c(input: &mut &str) -> winnow::ModalResult<String> {
     "$'".parse_next(input)?;
     let mut out = String::new();
     loop {
-        if input.is_empty() { return Err(ErrMode::Cut(ContextError::new())); }
-        if input.starts_with('\'') { *input = &input[1..]; return Ok(out); }
-        if let Some(rest) = input.strip_prefix('\\') {
-            let c = rest.chars().next().ok_or_else(|| ErrMode::Cut(ContextError::new()))?;
-            *input = &rest[c.len_utf8()..];
-            decode_ansi_c_escape(c, input, &mut out)?;
+        let Some(c) = input.chars().next() else { return Err(cut()) };
+
+        if c == '\'' { *input = &input[1..]; return Ok(out); }
+        if c == '\\' {
+            let rest = &input[1..];
+            let escaped = rest.chars().next().ok_or_else(cut)?;
+
+            *input = &rest[escaped.len_utf8()..];
+            decode_ansi_c_escape(escaped, input, &mut out)?;
             continue;
         }
-        let c = input.chars().next().unwrap();
         out.push(c);
         *input = &input[c.len_utf8()..];
     }
@@ -221,7 +249,7 @@ fn decode_ansi_c_escape(c: char, input: &mut &str, out: &mut String) -> winnow::
         '"' => out.push('"'),
         '?' => out.push('?'),
         'c' => {
-            let cc = input.chars().next().ok_or_else(|| ErrMode::Cut(ContextError::new()))?;
+            let cc = input.chars().next().ok_or_else(cut)?;
             *input = &input[cc.len_utf8()..];
             out.push(((cc as u32) & 0x1F) as u8 as char);
         }
@@ -239,7 +267,12 @@ fn decode_ansi_c_escape(c: char, input: &mut &str, out: &mut String) -> winnow::
                     _ => break,
                 }
             }
-            out.push(u8::from_str_radix(&oct, 8).unwrap() as char);
+            // Three octal digits reach 511. Bash prints no escape above
+            // `\377`, so a wider one is not its output.
+            let byte = u8::from_str_radix(&oct, 8)
+                .map_err(|_| cut())?;
+
+            out.push(byte as char);
         }
         _ => { out.push('\\'); out.push(c); }
     }
@@ -248,17 +281,17 @@ fn decode_ansi_c_escape(c: char, input: &mut &str, out: &mut String) -> winnow::
 
 fn push_radix(input: &mut &str, out: &mut String, max: usize, radix: u32) -> winnow::ModalResult<()> {
     let h = take_hex(input, max);
-    if h.is_empty() { return Err(ErrMode::Cut(ContextError::new())); }
-    let v = u8::from_str_radix(&h, radix).map_err(|_| ErrMode::Cut(ContextError::new()))?;
+    if h.is_empty() { return Err(cut()); }
+    let v = u8::from_str_radix(&h, radix).map_err(|_| cut())?;
     out.push(v as char);
     Ok(())
 }
 
 fn push_unicode(input: &mut &str, out: &mut String, max: usize) -> winnow::ModalResult<()> {
     let h = take_hex(input, max);
-    if h.is_empty() { return Err(ErrMode::Cut(ContextError::new())); }
-    let v = u32::from_str_radix(&h, 16).map_err(|_| ErrMode::Cut(ContextError::new()))?;
-    out.push(char::from_u32(v).ok_or_else(|| ErrMode::Cut(ContextError::new()))?);
+    if h.is_empty() { return Err(cut()); }
+    let v = u32::from_str_radix(&h, 16).map_err(|_| cut())?;
+    out.push(char::from_u32(v).ok_or_else(cut)?);
     Ok(())
 }
 
@@ -385,5 +418,40 @@ mod tests {
         assert!(parse_assoc("").is_err());
         assert!(parse_assoc("[k]='v'").is_err());
         assert!(parse_assoc("([k]=)").is_err());
+    }
+
+    /// Bash prints a byte it cannot show as up to three octal digits, and the
+    /// widest it ever prints is `\377`. Anything above that is not its output
+    /// and is refused rather than wrapped — three digits reach 511, which is
+    /// where an unchecked `u8` conversion would have given up.
+    #[test]
+    fn an_octal_escape_stops_at_a_byte() {
+        assert_eq!(parse_q_words(r"$'\377'").unwrap(), vec!["\u{ff}"]);
+        assert_eq!(parse_q_words(r"$'\0'").unwrap(), vec!["\0"]);
+        assert!(parse_q_words(r"$'\400'").is_err());
+        assert!(parse_q_words(r"$'\777'").is_err());
+    }
+
+    /// A subscript is a machine integer. One too wide to be one was never
+    /// printed by bash, and is an error rather than a panic.
+    #[test]
+    fn a_subscript_too_wide_to_be_one_is_refused() {
+        assert!(parse_indexed("([99999999999999999999999]='a')").is_err());
+        assert_eq!(
+            parse_indexed(&format!("([{}]='a')", usize::MAX)).unwrap(),
+            ix([(usize::MAX, "a")]),
+            "the widest one that is still an index"
+        );
+    }
+
+    /// The snippet in an error is cut to character boundaries, so an input
+    /// with multi-byte characters still reports one.
+    #[test]
+    fn an_error_reports_the_text_around_it() {
+        let long = format!("'{}' trailing", "é".repeat(30));
+        let failed = parse_scalar(&long).expect_err("trailing input");
+
+        assert!(!failed.snippet.is_empty(), "{failed}");
+        assert!(long.contains(&failed.snippet), "{failed}");
     }
 }

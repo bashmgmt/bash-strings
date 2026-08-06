@@ -38,6 +38,21 @@ All four are the crate's contract with bash, and the round trips are the
 strongest test of the parsers `bashcap` depends on, whether or not a given
 direction currently has a caller.
 
+### Where the forms stop
+
+Bash's output is the whole of what is accepted, and two places in it are wider
+than the type behind them. Both refuse rather than wrap:
+
+- **An octal escape is a byte.** `$'\377'` is the widest bash prints — that is
+  how a byte it cannot show crosses the wire, as ASCII, keeping the frame
+  valid UTF-8. Three octal digits reach 511, so `$'\400'` and above are not
+  bash's output and are an error.
+- **A subscript is a machine integer.** `[0]`, `[5]`, up to `usize::MAX`. One
+  too wide to be one was never printed by bash.
+
+The parsers are the crate's only reader of text it did not write, so the
+boundary is a `ParseError` at each of them and never a panic.
+
 ## Trees and codecs
 
 `codec.rs` holds the recursive value, its depth, and the two ways to flatten
