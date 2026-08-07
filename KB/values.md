@@ -94,9 +94,8 @@ is nothing to disagree with and nothing to fail. `parse` needs one, because
 the text alone does not say how many layers of quoting to peel.
 
 `words` and `rows` are `parse_literal` at `n_d(1)` and `n_d(2)` with the tree
-already walked back down to strings. They are the module's parse surface:
-`Schema` and the two methods that take one stay inside it, because no caller
-reads deeper than two and neither door asks for a depth.
+already walked back down to strings — the two depths this crate asks for. A
+`BashVal` and a `Schema` are what deeper or irregular shapes go through.
 
 **`QuotedNest`** makes each inner array one quoted word at the outer level:
 
