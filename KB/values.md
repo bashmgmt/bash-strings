@@ -1,6 +1,6 @@
 # Values — bash's own quoted forms
 
-`src/bash/value/` — `parser.rs`, `emit.rs`, `codec.rs`
+`src/bash/value/` — `quoting.rs`, `parser.rs`, `emit.rs`, `codec.rs`, `error.rs`
 
 The Rust side of the format bash already has.
 
@@ -38,6 +38,10 @@ All four are the crate's contract with bash, and the round trips are the
 strongest test of the parsers `bashcap` depends on, whether or not a given
 direction currently has a caller.
 
+One error type covers all of it: `ParseError` carries the message, the byte
+offset, and the text around it. A codec failure is one of these too — a layout
+that is not a literal, or a depth that wanted one word and found several.
+
 ### Where the forms stop
 
 Bash's output is the whole of what is accepted, and two places in it are wider
@@ -72,13 +76,13 @@ impl BashVal {
 
 pub trait BashCodec {
     fn emit(&self, val: &BashVal) -> Vec<String>;
-    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, CodecParseError>;
+    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, ParseError>;
 
     fn emit_literal(&self, val: &BashVal) -> String;
-    fn parse_literal(&self, input: &str, schema: &Schema) -> Result<BashVal, CodecParseError>;
+    fn parse_literal(&self, input: &str, schema: &Schema) -> Result<BashVal, ParseError>;
 
-    fn words(&self, input: &str) -> Result<Vec<String>, CodecParseError>;
-    fn rows(&self, input: &str)  -> Result<Vec<Vec<String>>, CodecParseError>;
+    fn words(&self, input: &str) -> Result<Vec<String>, ParseError>;
+    fn rows(&self, input: &str)  -> Result<Vec<Vec<String>>, ParseError>;
 }
 ```
 
@@ -90,8 +94,9 @@ is nothing to disagree with and nothing to fail. `parse` needs one, because
 the text alone does not say how many layers of quoting to peel.
 
 `words` and `rows` are `parse_literal` at `n_d(1)` and `n_d(2)` with the tree
-already walked back down to strings — the two depths every caller in the crate
-asks for. A `BashVal` is worth holding for deeper or irregular shapes.
+already walked back down to strings. They are the module's parse surface:
+`Schema` and the two methods that take one stay inside it, because no caller
+reads deeper than two and neither door asks for a depth.
 
 **`QuotedNest`** makes each inner array one quoted word at the outer level:
 

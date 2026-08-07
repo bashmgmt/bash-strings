@@ -15,10 +15,10 @@
 //! which is what the text alone does not say. Scalar leaves are raw strings —
 //! bash quoting is applied by [`emit_q_words`] when an assignment is built.
 
-use std::fmt;
 
 use super::emit::emit_q_words;
-use super::parser::{parse_q_words, ParseError};
+use super::error::ParseError;
+use super::parser::parse_q_words;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BashVal {
@@ -69,29 +69,9 @@ impl BashVal {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum CodecParseError {
-    LayoutError(String),
-    ExpectedScalar,
-    Word(ParseError),
-}
-
-impl fmt::Display for CodecParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::LayoutError(what) => write!(f, "layout: {what}"),
-            Self::ExpectedScalar => write!(f, "schema requires Scalar; got multiple words"),
-            Self::Word(cause) => write!(f, "word: {cause}"),
-        }
-    }
-}
-
-impl std::error::Error for CodecParseError {}
-
-impl From<ParseError> for CodecParseError {
-    fn from(cause: ParseError) -> Self {
-        Self::Word(cause)
-    }
+/// The depth said one word and there were others.
+fn scalar_expected(words: &[String]) -> ParseError {
+    ParseError::new(&words.join(" "), 0, format!("expected one word, got {}", words.len()))
 }
 
 pub trait BashCodec {
@@ -101,39 +81,37 @@ pub trait BashCodec {
 
     /// A `Schema` says how many layers of quoting to peel, which the text
     /// alone does not.
-    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, CodecParseError>;
+    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, ParseError>;
 
     /// A complete bash array literal: `(w1 w2 …)`, each scalar single-quoted.
     fn emit_literal(&self, val: &BashVal) -> String {
         format!("({})", emit_q_words(&self.emit(val)))
     }
 
-    fn parse_literal(&self, input: &str, schema: &Schema) -> Result<BashVal, CodecParseError> {
+    fn parse_literal(&self, input: &str, schema: &Schema) -> Result<BashVal, ParseError> {
         let trimmed = input.trim();
         let inner = trimmed
             .strip_prefix('(')
             .and_then(|rest| rest.strip_suffix(')'))
-            .ok_or_else(|| {
-                CodecParseError::LayoutError(format!("expected (...) array literal: {trimmed:?}"))
-            })?;
+            .ok_or_else(|| ParseError::new(trimmed, 0, "expected a (…) array literal"))?;
 
         self.parse(&parse_q_words(inner)?, schema)
     }
 
     /// A one-dimensional literal as its words: `('a' 'b')` → `["a", "b"]`.
-    fn words(&self, input: &str) -> Result<Vec<String>, CodecParseError> {
+    fn words(&self, input: &str) -> Result<Vec<String>, ParseError> {
         shaped(self.parse_literal(input, &Schema::n_d(1))?.words(), "words", input)
     }
 
     /// A two-dimensional literal as its rows: `("'a' 'b'" "'c'")` →
     /// `[["a", "b"], ["c"]]`.
-    fn rows(&self, input: &str) -> Result<Vec<Vec<String>>, CodecParseError> {
+    fn rows(&self, input: &str) -> Result<Vec<Vec<String>>, ParseError> {
         shaped(self.parse_literal(input, &Schema::n_d(2))?.rows(), "rows", input)
     }
 }
 
-fn shaped<T>(got: Option<T>, wanted: &str, input: &str) -> Result<T, CodecParseError> {
-    got.ok_or_else(|| CodecParseError::LayoutError(format!("expected {wanted}: {input:?}")))
+fn shaped<T>(got: Option<T>, wanted: &str, input: &str) -> Result<T, ParseError> {
+    got.ok_or_else(|| ParseError::new(input, 0, format!("expected {wanted}")))
 }
 
 pub struct QuotedNest;
@@ -152,11 +130,11 @@ impl BashCodec for QuotedNest {
         }
     }
 
-    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, CodecParseError> {
+    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, ParseError> {
         match schema {
             Schema::Scalar => match words {
                 [only] => Ok(BashVal::Str(only.clone())),
-                _ => Err(CodecParseError::ExpectedScalar),
+                _ => Err(scalar_expected(words)),
             },
             Schema::Arr(inner) => words
                 .iter()
@@ -204,19 +182,16 @@ impl BashCodec for LinkedArr {
         }
     }
 
-    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, CodecParseError> {
+    fn parse(&self, words: &[String], schema: &Schema) -> Result<BashVal, ParseError> {
         match schema {
             Schema::Scalar => match words {
                 [only] => Ok(BashVal::Str(only.clone())),
-                _ => Err(CodecParseError::ExpectedScalar),
+                _ => Err(scalar_expected(words)),
             },
             Schema::Arr(_) => {
                 let (val, consumed) = parse_body(words, schema)?;
                 if consumed != words.len() {
-                    return Err(CodecParseError::LayoutError(format!(
-                        "trailing words: consumed {consumed} of {}",
-                        words.len()
-                    )));
+                    return Err(ParseError::new(&words.join(" "), 0, format!("trailing words: consumed {consumed} of {}", words.len())));
                 }
                 Ok(val)
             }
@@ -224,11 +199,11 @@ impl BashCodec for LinkedArr {
     }
 }
 
-fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), CodecParseError> {
+fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), ParseError> {
     let Schema::Arr(inner) = schema else {
         return match words.first() {
             Some(word) => Ok((BashVal::Str(word.clone()), 1)),
-            None => Err(CodecParseError::LayoutError("scalar position; no word".into())),
+            None => Err(ParseError::new("", 0, "a scalar position with no word")),
         };
     };
 
@@ -244,27 +219,18 @@ fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), Cod
         }
 
         let width: usize = words[at].parse().map_err(|_| {
-            CodecParseError::LayoutError(format!(
-                "length prefix not numeric at pos {at}: {:?}",
-                words[at]
-            ))
+            ParseError::new(&words.join(" "), 0, format!("length prefix not numeric at pos {at}: {:?}", words[at]))
         })?;
         at += 1;
 
         let end = at + width;
         if end > words.len() {
-            return Err(CodecParseError::LayoutError(format!(
-                "group claims {width} words; only {} available",
-                words.len() - at
-            )));
+            return Err(ParseError::new(&words.join(" "), 0, format!("group claims {width} words; only {} available", words.len() - at)));
         }
 
         let (item, consumed) = parse_body(&words[at..end], inner)?;
         if consumed != end - at {
-            return Err(CodecParseError::LayoutError(format!(
-                "nested group: consumed {consumed} of {} body words",
-                end - at
-            )));
+            return Err(ParseError::new(&words.join(" "), 0, format!("nested group: consumed {consumed} of {} body words", end - at)));
         }
         items.push(item);
         at = end;
