@@ -4,6 +4,13 @@
 
 The Rust side of the format bash already has.
 
+**This layer stands on its own.** It imports nothing else in the crate, and
+two otherwise-disconnected halves use it: `bash/rig/` for the wire, and
+`resolve/` for `dependencies.list`. Its surface is what parsing and formatting
+bash values needs — not what either caller happens to reach for. `Schema` is
+the example: nothing here reads deeper than two dimensions, and it is public
+anyway, because stating a depth is part of the job.
+
 ## Four forms
 
 | form | shape | type | produced by bash as |
