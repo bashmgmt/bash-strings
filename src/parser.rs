@@ -1,4 +1,4 @@
-//! The four forms bash prints a value in, and nothing else.
+//! The forms bash prints a value in, and nothing else.
 //!
 //! Each is strict: it accepts what bash itself writes and refuses the rest.
 //! Where a word begins and ends is [`quoting`](super::quoting)'s; this is what
@@ -8,15 +8,16 @@
 //! |---|---|
 //! | scalar | one word |
 //! | q_words | words separated by exactly one space |
+//! | array | `('a' 'b c')` — q_words in parentheses |
+//! | rows | `("'a' 'b'" "'c'")` — an array of arrays, one level of nesting |
 //! | indexed | `([0]=… [5]=…)` — subscripts are data, and sparse |
 //! | assoc | `([k]=… )` — the key is a word too |
 
 use indexmap::IndexMap;
-use winnow::Parser;
-use winnow::token::take_while;
 
-use super::error::{cut, ParseError};
-use super::quoting::{run, word, ws0};
+use super::codec::{BashCodec, QuotedNest};
+use super::error::ParseError;
+use super::quoting::{parse_with, Cursor};
 
 /// Where a value ends. `)` closes a compound, so it stops a word inside one.
 const VALUE_STOPS: &[char] = &[' ', '\t', '\n', ')'];
@@ -24,80 +25,126 @@ const VALUE_STOPS: &[char] = &[' ', '\t', '\n', ')'];
 /// Where a subscript ends, inside its brackets.
 const KEY_STOPS: &[char] = &[']'];
 
-pub fn parse_scalar(s: &str) -> Result<String, ParseError> {
-    run(|i| word(VALUE_STOPS, i), s.trim_end_matches('\n'))
+pub fn parse_scalar(text: &str) -> Result<String, ParseError> {
+    parse_with(trimmed(text), |c| c.word(VALUE_STOPS))
 }
 
-pub fn parse_q_words(s: &str) -> Result<Vec<String>, ParseError> {
-    run(q_words, s.trim_end_matches('\n'))
+pub fn parse_q_words(text: &str) -> Result<Vec<String>, ParseError> {
+    parse_with(trimmed(text), q_words)
 }
 
-pub fn parse_indexed(s: &str) -> Result<IndexMap<usize, String>, ParseError> {
-    run(indexed_compound, s.trim_end_matches('\n'))
+/// One bash array literal as its words: `('a' 'b c')` → `["a", "b c"]`.
+///
+/// Codec-independent — at one dimension [`QuotedNest`] and
+/// [`LinkedArr`](super::LinkedArr) write the same text, so there is nothing to
+/// choose. Deeper values go through [`BashCodec`], where the choice is real.
+pub fn parse_array(text: &str) -> Result<Vec<String>, ParseError> {
+    parse_q_words(inside(text)?)
 }
 
-pub fn parse_assoc(s: &str) -> Result<IndexMap<String, String>, ParseError> {
-    run(assoc_compound, s.trim_end_matches('\n'))
+/// A two-dimensional literal as its rows, in [`QuotedNest`]'s encoding:
+/// `("'a' 'b'" "'c'")` → `[["a", "b"], ["c"]]`.
+pub fn parse_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
+    QuotedNest.rows(text)
+}
+
+pub fn parse_indexed(text: &str) -> Result<IndexMap<usize, String>, ParseError> {
+    parse_with(trimmed(text), indexed_compound)
+}
+
+pub fn parse_assoc(text: &str) -> Result<IndexMap<String, String>, ParseError> {
+    parse_with(trimmed(text), assoc_compound)
+}
+
+/// The body of a `(…)` array literal, which is the one shape that surrounds
+/// every other. Spelled here and nowhere else on the reading side;
+/// [`emit_array`](super::emit_array) is its inverse.
+pub(super) fn inside(text: &str) -> Result<&str, ParseError> {
+    let trimmed = text.trim();
+
+    trimmed
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+        .ok_or_else(|| ParseError::new(trimmed, 0, "expected a (…) array literal"))
+}
+
+/// Bash writes no trailing newline inside a value; one appended by a `$( )`
+/// or a file read is not part of it.
+fn trimmed(text: &str) -> &str {
+    text.trim_end_matches('\n')
 }
 
 /// Exactly one space between words: bash writes no more, so more is not its
 /// output.
-fn q_words(input: &mut &str) -> winnow::ModalResult<Vec<String>> {
+fn q_words(c: &mut Cursor<'_>) -> Result<Vec<String>, ParseError> {
     let mut out = Vec::new();
-    if input.is_empty() { return Ok(out); }
-    out.push(word(VALUE_STOPS, input)?);
-    while !input.is_empty() {
-        " ".parse_next(input)?;
-        out.push(word(VALUE_STOPS, input)?);
+    if c.at_end() {
+        return Ok(out);
+    }
+
+    out.push(c.word(VALUE_STOPS)?);
+    while !c.at_end() {
+        c.lit(" ")?;
+        out.push(c.word(VALUE_STOPS)?);
     }
     Ok(out)
 }
 
-fn indexed_compound(input: &mut &str) -> winnow::ModalResult<IndexMap<usize, String>> {
-    "(".parse_next(input)?;
-    ws0(input);
+fn indexed_compound(c: &mut Cursor<'_>) -> Result<IndexMap<usize, String>, ParseError> {
+    c.lit("(")?;
+    c.ws0();
+
     let mut out = IndexMap::new();
-    while !input.starts_with(')') {
-        let n = bracket_index(input)?;
-        "=".parse_next(input)?;
-        let v = word(VALUE_STOPS, input)?;
-        out.insert(n, v);
-        ws0(input);
+    while !c.starts_with(")") {
+        let index = bracket_index(c)?;
+        c.lit("=")?;
+        out.insert(index, c.word(VALUE_STOPS)?);
+        c.ws0();
     }
-    ")".parse_next(input)?;
+    c.lit(")")?;
+
     Ok(out)
 }
 
-fn assoc_compound(input: &mut &str) -> winnow::ModalResult<IndexMap<String, String>> {
-    "(".parse_next(input)?;
-    ws0(input);
+fn assoc_compound(c: &mut Cursor<'_>) -> Result<IndexMap<String, String>, ParseError> {
+    c.lit("(")?;
+    c.ws0();
+
     let mut out = IndexMap::new();
-    while !input.starts_with(')') {
-        "[".parse_next(input)?;
-        let k = word(KEY_STOPS, input)?;
-        "]".parse_next(input)?;
-        "=".parse_next(input)?;
-        let v = word(VALUE_STOPS, input)?;
-        out.insert(k, v);
-        ws0(input);
+    while !c.starts_with(")") {
+        c.lit("[")?;
+        let key = c.word(KEY_STOPS)?;
+        c.lit("]")?;
+        c.lit("=")?;
+        out.insert(key, c.word(VALUE_STOPS)?);
+        c.ws0();
     }
-    ")".parse_next(input)?;
+    c.lit(")")?;
+
     Ok(out)
 }
 
-fn bracket_index(input: &mut &str) -> winnow::ModalResult<usize> {
-    "[".parse_next(input)?;
-    let digits: &str = take_while(1.., |c: char| c.is_ascii_digit()).parse_next(input)?;
-    "]".parse_next(input)?;
+fn bracket_index(c: &mut Cursor<'_>) -> Result<usize, ParseError> {
+    c.lit("[")?;
+
+    let digits = c.take_while(|d| d.is_ascii_digit());
+    if digits.is_empty() {
+        return Err(c.fail("expected a subscript"));
+    }
 
     // A bash subscript is a machine integer. One too wide to be one was not
     // printed by bash, so it is rejected rather than wrapped or truncated.
-    digits.parse().map_err(|_| cut())
+    let index =
+        digits.parse().map_err(|_| c.fail(format!("subscript {digits:?} is not an index")))?;
+    c.lit("]")?;
+
+    Ok(index)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bash::value::{emit_array, emit_rows, BashVal, LinkedArr};
 
     fn ix<I: IntoIterator<Item = (usize, &'static str)>>(it: I) -> IndexMap<usize, String> {
         it.into_iter().map(|(k, v)| (k, v.to_string())).collect()
@@ -144,6 +191,50 @@ mod tests {
     fn ansi_c_escapes() {
         assert_eq!(parse_q_words(r"$'\t\r\\\''").unwrap(), vec!["\t\r\\'"]);
         assert_eq!(parse_q_words(r"$'\x41' $'\101'").unwrap(), vec!["A", "A"]);
+    }
+
+    #[test]
+    fn array_round_trips_and_needs_its_parentheses() {
+        let words = vec!["a".to_string(), "b c".into(), "d\ne".into(), String::new()];
+
+        assert_eq!(emit_array(&words), "('a' 'b c' $'d\\ne' '')");
+        assert_eq!(parse_array(&emit_array(&words)).unwrap(), words);
+        assert_eq!(parse_array("()").unwrap(), Vec::<String>::new());
+
+        let bare = parse_array("'a' 'b'").expect_err("no parentheses");
+        assert!(bare.message.contains("array literal"), "{bare}");
+    }
+
+    /// At one dimension the two codecs write the same text, which is what
+    /// lets `parse_array` take no codec.
+    #[test]
+    fn one_dimension_is_the_same_under_either_codec() {
+        let words = vec!["a".to_string(), "b c".into(), "2".into()];
+        let value = BashVal::row(words.clone());
+
+        assert_eq!(QuotedNest.emit_literal(&value), LinkedArr.emit_literal(&value));
+        assert_eq!(QuotedNest.emit_literal(&value), emit_array(&words));
+        assert_eq!(parse_array(&emit_array(&words)).unwrap(), words);
+    }
+
+    /// Two dimensions carried in one: each inner array is one word of the
+    /// outer, so a flat bash array holds a nested value.
+    #[test]
+    fn rows_round_trip_through_one_flat_array() {
+        let rows = vec![
+            vec!["AspectRequire".to_string(), "env".into(), "mod a".into()],
+            vec!["Accumulate".to_string()],
+            Vec::new(),
+        ];
+
+        let text = emit_rows(&rows);
+        let outer = parse_array(&text).unwrap();
+
+        assert_eq!(outer.len(), 3, "three words at the outer level, one per row");
+        assert_eq!(outer[0], "('AspectRequire' 'env' 'mod a')", "each one an array literal");
+        assert_eq!(parse_array(&outer[0]).unwrap(), rows[0], "which reads back on its own");
+
+        assert_eq!(parse_rows(&text).unwrap(), rows, "or in one step");
     }
 
     #[test]

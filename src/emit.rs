@@ -1,8 +1,11 @@
 //! Bash-value emitters — single canonical form (single-quoted, with
 //! `$'…'` fallback for non-printable bytes). One emission primitive
-//! ([`emit_scalar`]) underlies all four typed emitters.
+//! ([`emit_scalar`]) underlies every typed emitter, and one
+//! [`literal`] puts the parentheses on.
 
 use indexmap::IndexMap;
+
+use super::codec::{BashCodec, BashVal, QuotedNest};
 
 pub fn emit_scalar(s: &str) -> String {
     if s.is_empty() { return "''".into(); }
@@ -18,6 +21,22 @@ pub fn emit_scalar(s: &str) -> String {
 
 pub fn emit_q_words(words: &[String]) -> String {
     words.iter().map(|word| emit_scalar(word)).collect::<Vec<_>>().join(" ")
+}
+
+/// One bash array literal: `["a", "b c"]` → `('a' 'b c')`. The shape a
+/// message, an answer and every captured column travel as, and the inverse of
+/// [`parse_array`](super::parse_array).
+pub fn emit_array(words: &[String]) -> String {
+    literal(words.iter().map(|word| emit_scalar(word)))
+}
+
+/// Two dimensions carried in one: each row becomes a single word of the outer
+/// array, in [`QuotedNest`]'s encoding. The inverse of
+/// [`parse_rows`](super::parse_rows).
+pub fn emit_rows(rows: &[Vec<String>]) -> String {
+    QuotedNest.emit_literal(&BashVal::Arr(
+        rows.iter().map(|row| BashVal::row(row.iter().cloned())).collect(),
+    ))
 }
 
 pub fn emit_indexed(m: &IndexMap<usize, String>) -> String {

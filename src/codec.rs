@@ -13,12 +13,19 @@
 //!
 //! Emitting takes the depth from the value; parsing takes it from a `Schema`,
 //! which is what the text alone does not say. Scalar leaves are raw strings —
-//! bash quoting is applied by [`emit_q_words`] when an assignment is built.
+//! bash quoting is applied by [`emit_array`] when a literal
+//! is built.
+//!
+//! One and two dimensions are the ubiquitous cases and have named entry points
+//! that need no `Schema`: [`parse_array`](super::parse_array) /
+//! [`emit_array`] and [`parse_rows`](super::parse_rows) /
+//! [`emit_rows`](super::emit_rows). This is what anything deeper, or in
+//! `LinkedArr`'s encoding, goes through.
 
 
-use super::emit::emit_q_words;
+use super::emit::emit_array;
 use super::error::ParseError;
-use super::parser::parse_q_words;
+use super::parser::{inside, parse_q_words};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BashVal {
@@ -85,33 +92,21 @@ pub trait BashCodec {
 
     /// A complete bash array literal: `(w1 w2 …)`, each scalar single-quoted.
     fn emit_literal(&self, val: &BashVal) -> String {
-        format!("({})", emit_q_words(&self.emit(val)))
+        emit_array(&self.emit(val))
     }
 
     fn parse_literal(&self, input: &str, schema: &Schema) -> Result<BashVal, ParseError> {
-        let trimmed = input.trim();
-        let inner = trimmed
-            .strip_prefix('(')
-            .and_then(|rest| rest.strip_suffix(')'))
-            .ok_or_else(|| ParseError::new(trimmed, 0, "expected a (…) array literal"))?;
-
-        self.parse(&parse_q_words(inner)?, schema)
-    }
-
-    /// A one-dimensional literal as its words: `('a' 'b')` → `["a", "b"]`.
-    fn words(&self, input: &str) -> Result<Vec<String>, ParseError> {
-        shaped(self.parse_literal(input, &Schema::n_d(1))?.words(), "words", input)
+        self.parse(&parse_q_words(inside(input)?)?, schema)
     }
 
     /// A two-dimensional literal as its rows: `("'a' 'b'" "'c'")` →
-    /// `[["a", "b"], ["c"]]`.
+    /// `[["a", "b"], ["c"]]`. One dimension needs no codec — see
+    /// [`parse_array`](super::parse_array).
     fn rows(&self, input: &str) -> Result<Vec<Vec<String>>, ParseError> {
-        shaped(self.parse_literal(input, &Schema::n_d(2))?.rows(), "rows", input)
+        self.parse_literal(input, &Schema::n_d(2))?
+            .rows()
+            .ok_or_else(|| ParseError::new(input, 0, "expected rows"))
     }
-}
-
-fn shaped<T>(got: Option<T>, wanted: &str, input: &str) -> Result<T, ParseError> {
-    got.ok_or_else(|| ParseError::new(input, 0, format!("expected {wanted}")))
 }
 
 pub struct QuotedNest;
@@ -278,6 +273,22 @@ mod tests {
         assert_eq!(
             LinkedArr.emit(&arr(vec![arr(vec![row(&["a", "b"])]), arr(vec![row(&["c"])])])),
             words(&["3", "2", "a", "b", "2", "1", "c"])
+        );
+    }
+
+    /// Past two dimensions the named helpers stop and a `Schema` says how deep
+    /// to look — the text alone cannot, since every level is just words.
+    #[test]
+    fn quoted_nest_round_trips_at_three_dimensions() {
+        let three_d =
+            arr(vec![arr(vec![row(&["a", "b"]), row(&["c"])]), arr(vec![row(&["d", "e"])])]);
+        let text = QuotedNest.emit_literal(&three_d);
+
+        assert_eq!(QuotedNest.parse_literal(&text, &Schema::n_d(3)).unwrap(), three_d);
+        assert_eq!(
+            QuotedNest.parse_literal(&text, &Schema::n_d(2)).unwrap().rows().unwrap().len(),
+            2,
+            "read one level shallower it is still two rows, of one word each"
         );
     }
 

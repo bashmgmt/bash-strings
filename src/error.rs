@@ -1,8 +1,6 @@
-//! What a refusal says, and the two ways a parser here produces one.
+//! What a refusal says.
 
 use std::fmt;
-
-use winnow::error::{ContextError, ErrMode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
@@ -15,10 +13,6 @@ impl ParseError {
     pub fn new(input: &str, at: usize, message: impl Into<String>) -> Self {
         Self { message: message.into(), at, snippet: around(input, at) }
     }
-
-    pub(super) fn from_winnow<E: fmt::Display>(input: &str, at: usize, err: E) -> Self {
-        Self::new(input, at, err.to_string())
-    }
 }
 
 impl fmt::Display for ParseError {
@@ -29,13 +23,6 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
-
-/// A refusal that ends the parse. Once a quoted form's opener is read there is
-/// only one way to finish it, so there is nothing to back off to — unlike a
-/// bare segment, which `word` retries.
-pub(super) fn cut() -> ErrMode<ContextError> {
-    ErrMode::Cut(ContextError::new())
-}
 
 /// The text around an offset, widened to character boundaries — so a snippet
 /// is still a snippet when the input holds multi-byte characters.
