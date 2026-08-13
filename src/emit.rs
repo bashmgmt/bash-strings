@@ -5,7 +5,6 @@
 
 use indexmap::IndexMap;
 
-use super::codec::{BashCodec, BashVal, QuotedNest};
 
 pub fn emit_scalar(s: &str) -> String {
     if s.is_empty() { return "''".into(); }
@@ -28,15 +27,6 @@ pub fn emit_q_words(words: &[String]) -> String {
 /// [`parse_array`](super::parse_array).
 pub fn emit_array(words: &[String]) -> String {
     literal(words.iter().map(|word| emit_scalar(word)))
-}
-
-/// Two dimensions carried in one: each row becomes a single word of the outer
-/// array, in [`QuotedNest`]'s encoding. The inverse of
-/// [`parse_rows`](super::parse_rows).
-pub fn emit_rows(rows: &[Vec<String>]) -> String {
-    QuotedNest.emit_literal(&BashVal::Arr(
-        rows.iter().map(|row| BashVal::row(row.iter().cloned())).collect(),
-    ))
 }
 
 pub fn emit_indexed(m: &IndexMap<usize, String>) -> String {
@@ -85,7 +75,7 @@ fn ansi_c(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::value::parser::{parse_assoc, parse_indexed, parse_q_words, parse_scalar};
+    use super::super::parser::{parse_assoc, parse_indexed, parse_q_words, parse_scalar};
 
     fn ix<I: IntoIterator<Item = (usize, &'static str)>>(it: I) -> IndexMap<usize, String> {
         it.into_iter().map(|(k, v)| (k, v.to_string())).collect()

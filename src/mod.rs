@@ -71,7 +71,8 @@ mod parser;
 mod quoting;
 
 pub use codec::{BashCodec, BashVal, LinkedArr, QuotedNest, Schema};
-pub use emit::{emit_array, emit_assoc, emit_indexed, emit_q_words, emit_rows, emit_scalar};
+
+pub use emit::{emit_array, emit_assoc, emit_indexed, emit_q_words, emit_scalar};
 pub use error::ParseError;
-pub use parser::{parse_array, parse_assoc, parse_indexed, parse_q_words, parse_rows, parse_scalar};
+pub use parser::{parse_array, parse_assoc, parse_indexed, parse_scalar};
 pub use quoting::{parse_with, Cursor};

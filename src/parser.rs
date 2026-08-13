@@ -15,7 +15,6 @@
 
 use indexmap::IndexMap;
 
-use super::codec::{BashCodec, QuotedNest};
 use super::error::ParseError;
 use super::quoting::{parse_with, Cursor};
 
@@ -35,17 +34,11 @@ pub fn parse_q_words(text: &str) -> Result<Vec<String>, ParseError> {
 
 /// One bash array literal as its words: `('a' 'b c')` → `["a", "b c"]`.
 ///
-/// Codec-independent — at one dimension [`QuotedNest`] and
+/// Codec-independent — at one dimension [`QuotedNest`](super::QuotedNest) and
 /// [`LinkedArr`](super::LinkedArr) write the same text, so there is nothing to
-/// choose. Deeper values go through [`BashCodec`], where the choice is real.
+/// choose. Deeper values go through [`BashCodec`](super::BashCodec), where the choice is real.
 pub fn parse_array(text: &str) -> Result<Vec<String>, ParseError> {
     parse_q_words(inside(text)?)
-}
-
-/// A two-dimensional literal as its rows, in [`QuotedNest`]'s encoding:
-/// `("'a' 'b'" "'c'")` → `[["a", "b"], ["c"]]`.
-pub fn parse_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
-    QuotedNest.rows(text)
 }
 
 pub fn parse_indexed(text: &str) -> Result<IndexMap<usize, String>, ParseError> {
@@ -143,8 +136,9 @@ fn bracket_index(c: &mut Cursor<'_>) -> Result<usize, ParseError> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::codec::{BashCodec, QuotedNest};
     use super::*;
-    use crate::bash::value::{emit_array, emit_rows, BashVal, LinkedArr};
+    use crate::bash::value::{emit_array, BashVal, LinkedArr};
 
     fn ix<I: IntoIterator<Item = (usize, &'static str)>>(it: I) -> IndexMap<usize, String> {
         it.into_iter().map(|(k, v)| (k, v.to_string())).collect()
@@ -215,26 +209,6 @@ mod tests {
         assert_eq!(QuotedNest.emit_literal(&value), LinkedArr.emit_literal(&value));
         assert_eq!(QuotedNest.emit_literal(&value), emit_array(&words));
         assert_eq!(parse_array(&emit_array(&words)).unwrap(), words);
-    }
-
-    /// Two dimensions carried in one: each inner array is one word of the
-    /// outer, so a flat bash array holds a nested value.
-    #[test]
-    fn rows_round_trip_through_one_flat_array() {
-        let rows = vec![
-            vec!["AspectRequire".to_string(), "env".into(), "mod a".into()],
-            vec!["Accumulate".to_string()],
-            Vec::new(),
-        ];
-
-        let text = emit_rows(&rows);
-        let outer = parse_array(&text).unwrap();
-
-        assert_eq!(outer.len(), 3, "three words at the outer level, one per row");
-        assert_eq!(outer[0], "('AspectRequire' 'env' 'mod a')", "each one an array literal");
-        assert_eq!(parse_array(&outer[0]).unwrap(), rows[0], "which reads back on its own");
-
-        assert_eq!(parse_rows(&text).unwrap(), rows, "or in one step");
     }
 
     #[test]

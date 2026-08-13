@@ -16,12 +16,10 @@
 //! bash quoting is applied by [`emit_array`] when a literal
 //! is built.
 //!
-//! One and two dimensions are the ubiquitous cases and have named entry points
-//! that need no `Schema`: [`parse_array`](super::parse_array) /
-//! [`emit_array`] and [`parse_rows`](super::parse_rows) /
-//! [`emit_rows`](super::emit_rows). This is what anything deeper, or in
-//! `LinkedArr`'s encoding, goes through.
-
+//! One dimension is the ubiquitous case and has a named entry point that needs
+//! no `Schema`: [`parse_array`](super::parse_array) / [`emit_array`]. Anything
+//! deeper, or in `LinkedArr`'s encoding, goes through a codec and a schema —
+//! two dimensions through [`QuotedNest::rows`].
 
 use super::emit::emit_array;
 use super::error::ParseError;
@@ -236,6 +234,28 @@ fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), Par
 
 #[cfg(test)]
 mod tests {
+
+    /// Two dimensions carried in one: each inner array is one word of the
+    /// outer, so a flat bash array holds a nested value.
+    #[test]
+    fn rows_round_trip_through_one_flat_array() {
+        let rows = vec![
+            vec!["AspectRequire".to_string(), "env".into(), "mod a".into()],
+            vec!["Accumulate".to_string()],
+            Vec::new(),
+        ];
+
+        let text = QuotedNest.emit_literal(&BashVal::Arr(
+            rows.iter().map(|row| BashVal::row(row.iter().cloned())).collect(),
+        ));
+        let outer = super::super::parse_array(&text).unwrap();
+
+        assert_eq!(outer.len(), 3, "three words at the outer level, one per row");
+        assert_eq!(outer[0], "('AspectRequire' 'env' 'mod a')", "each one an array literal");
+        assert_eq!(super::super::parse_array(&outer[0]).unwrap(), rows[0], "which reads back on its own");
+
+        assert_eq!(QuotedNest.rows(&text).unwrap(), rows, "or in one step");
+    }
     use super::*;
 
     fn row(words: &[&str]) -> BashVal {
