@@ -44,7 +44,7 @@
 //!   walker reads.
 //!
 //! ```
-//! use mb_resolver::bash::value::{BashCodec, BashVal, LinkedArr, Schema, ParseError};
+//! use mb_resolver::bash::value::{BashCodec, BashVal, LinkedArr, ParseError, Schema};
 //!
 //! let value = BashVal::Arr(vec![BashVal::row(["a", "b"]), BashVal::row(["c"])]);
 //! let text = LinkedArr.emit_literal(&value);
