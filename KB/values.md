@@ -211,6 +211,6 @@ that, spelled directly.
 
 ## See also
 
-- [wire.md](wire.md#messages) — the one message format, built on array literals
-- [bashcap.md](bashcap.md#the-decoder) — the deepest use, at `n_d(2)`
-- [scoping.md](scoping.md) — where the bash half of all this binds its names
+- `bash-interop/KB/wire.md#messages` — the one message format, built on array literals
+- `bashcap/KB/bashcap.md#the-decoder` — the deepest use, at `n_d(2)`
+- `bash-interop/KB/scoping.md` — where the bash half of all this binds its names
