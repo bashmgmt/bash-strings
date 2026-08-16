@@ -7,7 +7,7 @@ readme = "README.md"
 repository = "https://github.com/simlei/bash-strings"
 keywords = ["bash", "shell", "quoting", "parser", "serialization"]
 categories = ["parser-implementations", "encoding", "command-line-interface"]
-exclude = ["KB/**", ".plans/**"]
+exclude = [".plans/**"]
 
 [dependencies]
 indexmap = "2"

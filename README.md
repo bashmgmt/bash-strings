@@ -6,4 +6,4 @@ writes), canonical on output. Plus `Cursor`/`parse_with`, the word lexer over
 bash's quoting rules for grammars of your own.
 
 The reference is the crate doc (`cargo doc --open`); design notes live in
-[`KB/values.md`](KB/values.md).
+[`docs/values.md`](docs/values.md).
