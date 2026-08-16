@@ -1,17 +1,17 @@
 # Values — bash's own quoted forms
 
-`src/bash/value/` — `quoting.rs`, `parser.rs`, `emit.rs`, `codec.rs`, `error.rs`
+`src/` — `quoting.rs`, `parser.rs`, `emit.rs`, `codec.rs`, `error.rs`
 
 The Rust side of the format bash already has.
 
-**This layer stands on its own.** It imports nothing else in the crate, and
-three otherwise-disconnected callers use it: `bash/rig/` for the wire,
-`bashcap/` for captured variables, and `resolve/` for `dependencies.list` and
-the aspect grammar. Its surface is what parsing and formatting bash values
-needs — not what any one caller happens to reach for.
+**This crate stands on its own.** It depends on nothing else in the
+workspace, and three otherwise-disconnected consumers use it: `bash-interop`
+for the wire, `bashcap` for captured variables, and `mb_resolver` for
+`dependencies.list` and the aspect grammar. Its surface is what parsing and
+formatting bash values needs — not what any one caller happens to reach for.
 
-Every module inside is private. The re-export list in `mod.rs` is the API, so
-nothing is reachable only by reaching through, and no dependency of the
+Every module inside is private. The re-export list in `lib.rs` is the API,
+so nothing is reachable only by reaching through, and no dependency of the
 implementation appears in a signature.
 
 ## Three levels
@@ -151,7 +151,7 @@ uses.
 ```
 
 Denser, and it matches `glue-core/src/data/linked_arr.bash` on the ManageBash
-side. `resolve/cli/resolver/resolver_util.rs` emits it.
+side. `mb_resolver`'s resolver CLI emits it.
 
 ## Level 3 — a grammar over other syntax
 
@@ -186,7 +186,7 @@ pub fn parse_with<T>(
 none can quietly match a prefix. A refusal carries the offset it reached,
 constructed where the parse stopped.
 
-`resolve/parsing/aspect.rs` is the worked instance: `Name(key=value,
+`mb_resolver`'s aspect grammar is the worked instance: `Name(key=value,
 key2='two words')` is not a bash value, but each parameter is a bash word, so
 it declares two stop sets and writes twenty lines.
 
@@ -211,6 +211,6 @@ that, spelled directly.
 
 ## See also
 
-- `bash-interop/docs/wire.md#messages` — the one message format, built on array literals
+- `bash-interop/docs/wire.md#what-a-line-is` — the one message format, built on array literals
 - `bashcap/docs/bashcap.md#the-decoder` — the deepest use, at `n_d(2)`
 - `bash-interop/docs/scoping.md` — where the bash half of all this binds its names
