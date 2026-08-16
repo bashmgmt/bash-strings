@@ -248,11 +248,11 @@ mod tests {
         let text = QuotedNest.emit_literal(&BashVal::Arr(
             rows.iter().map(|row| BashVal::row(row.iter().cloned())).collect(),
         ));
-        let outer = super::super::parse_array(&text).unwrap();
+        let outer = crate::parse_array(&text).unwrap();
 
         assert_eq!(outer.len(), 3, "three words at the outer level, one per row");
         assert_eq!(outer[0], "('AspectRequire' 'env' 'mod a')", "each one an array literal");
-        assert_eq!(super::super::parse_array(&outer[0]).unwrap(), rows[0], "which reads back on its own");
+        assert_eq!(crate::parse_array(&outer[0]).unwrap(), rows[0], "which reads back on its own");
 
         assert_eq!(QuotedNest.rows(&text).unwrap(), rows, "or in one step");
     }

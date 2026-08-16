@@ -15,7 +15,7 @@
 //! entirely different syntax passes its own and gets bash quoting for free.
 //!
 //! ```
-//! use mb_resolver::bash::value::{parse_with, ParseError};
+//! use bash_strings::{parse_with, ParseError};
 //!
 //! // `key: value, key: value` — not a bash value, but the words are bash's.
 //! const STOPS: &[char] = &[':', ',', ' '];

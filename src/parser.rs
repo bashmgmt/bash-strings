@@ -138,7 +138,7 @@ fn bracket_index(c: &mut Cursor<'_>) -> Result<usize, ParseError> {
 mod tests {
     use super::super::codec::{BashCodec, QuotedNest};
     use super::*;
-    use crate::bash::value::{emit_array, BashVal, LinkedArr};
+    use crate::{emit_array, BashVal, LinkedArr};
 
     fn ix<I: IntoIterator<Item = (usize, &'static str)>>(it: I) -> IndexMap<usize, String> {
         it.into_iter().map(|(k, v)| (k, v.to_string())).collect()

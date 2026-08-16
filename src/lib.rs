@@ -1,4 +1,4 @@
-//! Bash value primitives — parse and emit the right-hand side of a bash
+//! Bash value strings — parse and emit the right-hand side of a bash
 //! assignment.
 //!
 //! A general utility about bash, standing on its own: nothing here knows about
@@ -20,7 +20,7 @@
 //! | assoc | `(['k']='v')` | `IndexMap<String, String>` | `${x[*]@A}`, `declare -A` |
 //!
 //! ```
-//! use mb_resolver::bash::value::{emit_array, parse_array, ParseError};
+//! use bash_strings::{emit_array, parse_array, ParseError};
 //!
 //! let words = vec!["compiled".to_string(), "a file.rs".to_string()];
 //!
@@ -44,7 +44,7 @@
 //!   walker reads.
 //!
 //! ```
-//! use mb_resolver::bash::value::{BashCodec, BashVal, LinkedArr, ParseError, Schema};
+//! use bash_strings::{BashCodec, BashVal, LinkedArr, ParseError, Schema};
 //!
 //! let value = BashVal::Arr(vec![BashVal::row(["a", "b"]), BashVal::row(["c"])]);
 //! let text = LinkedArr.emit_literal(&value);

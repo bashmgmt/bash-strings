@@ -1,0 +1,13 @@
+[package]
+name = "bash-strings"
+version = "0.1.0"
+edition = "2024"
+description = "Parse and emit bash's own quoted value forms: @Q words, array literals, declare -p bodies, and a word lexer over bash quoting."
+readme = "README.md"
+repository = "https://github.com/simlei/bash-strings"
+keywords = ["bash", "shell", "quoting", "parser", "serialization"]
+categories = ["parser-implementations", "encoding", "command-line-interface"]
+exclude = ["KB/**", ".plans/**"]
+
+[dependencies]
+indexmap = "2"
