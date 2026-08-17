@@ -16,7 +16,7 @@
 use indexmap::IndexMap;
 
 use super::error::ParseError;
-use super::quoting::{parse_with, Cursor};
+use super::quoting::{Cursor, parse_with};
 
 /// Where a value ends. `)` closes a compound, so it stops a word inside one.
 const VALUE_STOPS: &[char] = &[' ', '\t', '\n', ')'];
@@ -58,7 +58,13 @@ pub(super) fn inside(text: &str) -> Result<&str, ParseError> {
     trimmed
         .strip_prefix('(')
         .and_then(|rest| rest.strip_suffix(')'))
-        .ok_or_else(|| ParseError::new(trimmed, 0, "expected a (…) array literal"))
+        .ok_or_else(|| {
+            ParseError::new(
+                trimmed,
+                0,
+                "expected a (…) array literal",
+            )
+        })
 }
 
 /// Bash writes no trailing newline inside a value; one appended by a `$( )`
@@ -127,8 +133,11 @@ fn bracket_index(c: &mut Cursor<'_>) -> Result<usize, ParseError> {
 
     // A bash subscript is a machine integer. One too wide to be one was not
     // printed by bash, so it is rejected rather than wrapped or truncated.
-    let index =
-        digits.parse().map_err(|_| c.fail(format!("subscript {digits:?} is not an index")))?;
+    let index = digits.parse().map_err(|_| {
+        c.fail(format!(
+            "subscript {digits:?} is not an index"
+        ))
+    })?;
     c.lit("]")?;
 
     Ok(index)
@@ -138,20 +147,31 @@ fn bracket_index(c: &mut Cursor<'_>) -> Result<usize, ParseError> {
 mod tests {
     use super::super::codec::{BashCodec, QuotedNest};
     use super::*;
-    use crate::{emit_array, BashVal, LinkedArr};
+    use crate::{BashVal, LinkedArr, emit_array};
 
     fn ix<I: IntoIterator<Item = (usize, &'static str)>>(it: I) -> IndexMap<usize, String> {
         it.into_iter().map(|(k, v)| (k, v.to_string())).collect()
     }
     fn ax<I: IntoIterator<Item = (&'static str, &'static str)>>(it: I) -> IndexMap<String, String> {
-        it.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        it.into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
     fn scalar_canonical_forms() {
-        assert_eq!(parse_scalar("'hello world'").unwrap(), "hello world");
-        assert_eq!(parse_scalar(r#""hello \$VAR""#).unwrap(), "hello $VAR");
-        assert_eq!(parse_scalar(r"$'a\nb'").unwrap(), "a\nb");
+        assert_eq!(
+            parse_scalar("'hello world'").unwrap(),
+            "hello world"
+        );
+        assert_eq!(
+            parse_scalar(r#""hello \$VAR""#).unwrap(),
+            "hello $VAR"
+        );
+        assert_eq!(
+            parse_scalar(r"$'a\nb'").unwrap(),
+            "a\nb"
+        );
         assert_eq!(parse_scalar("''").unwrap(), "");
     }
 
@@ -169,9 +189,18 @@ mod tests {
 
     #[test]
     fn q_words_canonical() {
-        assert_eq!(parse_q_words("'a' 'b'").unwrap(),         vec!["a", "b"]);
-        assert_eq!(parse_q_words("'a b' $'c\\nd'").unwrap(),  vec!["a b", "c\nd"]);
-        assert_eq!(parse_q_words("").unwrap(),                Vec::<String>::new());
+        assert_eq!(
+            parse_q_words("'a' 'b'").unwrap(),
+            vec!["a", "b"]
+        );
+        assert_eq!(
+            parse_q_words("'a b' $'c\\nd'").unwrap(),
+            vec!["a b", "c\nd"]
+        );
+        assert_eq!(
+            parse_q_words("").unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -183,20 +212,38 @@ mod tests {
 
     #[test]
     fn ansi_c_escapes() {
-        assert_eq!(parse_q_words(r"$'\t\r\\\''").unwrap(), vec!["\t\r\\'"]);
-        assert_eq!(parse_q_words(r"$'\x41' $'\101'").unwrap(), vec!["A", "A"]);
+        assert_eq!(
+            parse_q_words(r"$'\t\r\\\''").unwrap(),
+            vec!["\t\r\\'"]
+        );
+        assert_eq!(
+            parse_q_words(r"$'\x41' $'\101'").unwrap(),
+            vec!["A", "A"]
+        );
     }
 
     #[test]
     fn array_round_trips_and_needs_its_parentheses() {
         let words = vec!["a".to_string(), "b c".into(), "d\ne".into(), String::new()];
 
-        assert_eq!(emit_array(&words), "('a' 'b c' $'d\\ne' '')");
-        assert_eq!(parse_array(&emit_array(&words)).unwrap(), words);
-        assert_eq!(parse_array("()").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            emit_array(&words),
+            "('a' 'b c' $'d\\ne' '')"
+        );
+        assert_eq!(
+            parse_array(&emit_array(&words)).unwrap(),
+            words
+        );
+        assert_eq!(
+            parse_array("()").unwrap(),
+            Vec::<String>::new()
+        );
 
         let bare = parse_array("'a' 'b'").expect_err("no parentheses");
-        assert!(bare.message.contains("array literal"), "{bare}");
+        assert!(
+            bare.message.contains("array literal"),
+            "{bare}"
+        );
     }
 
     /// At one dimension the two codecs write the same text, which is what
@@ -206,23 +253,39 @@ mod tests {
         let words = vec!["a".to_string(), "b c".into(), "2".into()];
         let value = BashVal::row(words.clone());
 
-        assert_eq!(QuotedNest.emit_literal(&value), LinkedArr.emit_literal(&value));
-        assert_eq!(QuotedNest.emit_literal(&value), emit_array(&words));
-        assert_eq!(parse_array(&emit_array(&words)).unwrap(), words);
+        assert_eq!(
+            QuotedNest.emit_literal(&value),
+            LinkedArr.emit_literal(&value)
+        );
+        assert_eq!(
+            QuotedNest.emit_literal(&value),
+            emit_array(&words)
+        );
+        assert_eq!(
+            parse_array(&emit_array(&words)).unwrap(),
+            words
+        );
     }
 
     #[test]
     fn indexed_canonical() {
-        assert_eq!(parse_indexed("([0]='a' [1]='b')").unwrap(),  ix([(0, "a"), (1, "b")]));
-        assert_eq!(parse_indexed("()").unwrap(),                  ix([]));
-        assert_eq!(parse_indexed(r#"([0]="a" [1]="b c" [2]=$'d\ne')"#).unwrap(),
-                   ix([(0, "a"), (1, "b c"), (2, "d\ne")]));
+        assert_eq!(
+            parse_indexed("([0]='a' [1]='b')").unwrap(),
+            ix([(0, "a"), (1, "b")])
+        );
+        assert_eq!(parse_indexed("()").unwrap(), ix([]));
+        assert_eq!(
+            parse_indexed(r#"([0]="a" [1]="b c" [2]=$'d\ne')"#).unwrap(),
+            ix([(0, "a"), (1, "b c"), (2, "d\ne")])
+        );
     }
 
     #[test]
     fn indexed_sparse_ascending() {
-        assert_eq!(parse_indexed(r#"([0]="zero" [2]="two" [5]="five")"#).unwrap(),
-                   ix([(0, "zero"), (2, "two"), (5, "five")]));
+        assert_eq!(
+            parse_indexed(r#"([0]="zero" [2]="two" [5]="five")"#).unwrap(),
+            ix([(0, "zero"), (2, "two"), (5, "five")])
+        );
     }
 
     #[test]
@@ -235,16 +298,23 @@ mod tests {
 
     #[test]
     fn assoc_canonical() {
-        assert_eq!(parse_assoc(r#"([k]="v")"#).unwrap(),  ax([("k", "v")]));
-        assert_eq!(parse_assoc("()").unwrap(),             ax([]));
-        assert_eq!(parse_assoc(r#"([foo]="1" [c]="3" )"#).unwrap(),
-                   ax([("foo", "1"), ("c", "3")]));
+        assert_eq!(
+            parse_assoc(r#"([k]="v")"#).unwrap(),
+            ax([("k", "v")])
+        );
+        assert_eq!(parse_assoc("()").unwrap(), ax([]));
+        assert_eq!(
+            parse_assoc(r#"([foo]="1" [c]="3" )"#).unwrap(),
+            ax([("foo", "1"), ("c", "3")])
+        );
     }
 
     #[test]
     fn assoc_quoted_key_ansi_value() {
-        assert_eq!(parse_assoc(r#"([foo]="1" ["k 2"]=$'v\n2' [c]="3" )"#).unwrap(),
-                   ax([("foo", "1"), ("k 2", "v\n2"), ("c", "3")]));
+        assert_eq!(
+            parse_assoc(r#"([foo]="1" ["k 2"]=$'v\n2' [c]="3" )"#).unwrap(),
+            ax([("foo", "1"), ("k 2", "v\n2"), ("c", "3")])
+        );
     }
 
     #[test]
@@ -260,8 +330,14 @@ mod tests {
     /// where an unchecked `u8` conversion would have given up.
     #[test]
     fn an_octal_escape_stops_at_a_byte() {
-        assert_eq!(parse_q_words(r"$'\377'").unwrap(), vec!["\u{ff}"]);
-        assert_eq!(parse_q_words(r"$'\0'").unwrap(), vec!["\0"]);
+        assert_eq!(
+            parse_q_words(r"$'\377'").unwrap(),
+            vec!["\u{ff}"]
+        );
+        assert_eq!(
+            parse_q_words(r"$'\0'").unwrap(),
+            vec!["\0"]
+        );
         assert!(parse_q_words(r"$'\400'").is_err());
         assert!(parse_q_words(r"$'\777'").is_err());
     }
@@ -286,6 +362,9 @@ mod tests {
         let failed = parse_scalar(&long).expect_err("trailing input");
 
         assert!(!failed.snippet.is_empty(), "{failed}");
-        assert!(long.contains(&failed.snippet), "{failed}");
+        assert!(
+            long.contains(&failed.snippet),
+            "{failed}"
+        );
     }
 }

@@ -115,7 +115,10 @@ impl<'a> Cursor<'a> {
 
     /// Every leading character the predicate accepts, possibly none.
     pub fn take_while(&mut self, accept: impl Fn(char) -> bool) -> &'a str {
-        let end = self.rest.find(|c: char| !accept(c)).unwrap_or(self.rest.len());
+        let end = self
+            .rest
+            .find(|c: char| !accept(c))
+            .unwrap_or(self.rest.len());
         let (taken, rest) = self.rest.split_at(end);
 
         self.rest = rest;
@@ -202,7 +205,9 @@ impl<'a> Cursor<'a> {
         loop {
             // Reading the character is what says there is one, so the body
             // below never has to ask again.
-            let Some(c) = self.peek() else { return Err(self.fail("unterminated \" quote")) };
+            let Some(c) = self.peek() else {
+                return Err(self.fail("unterminated \" quote"));
+            };
 
             if c == '"' {
                 self.advance(c);
@@ -233,7 +238,9 @@ impl<'a> Cursor<'a> {
     fn ansi_c(&mut self) -> Result<String, ParseError> {
         let mut out = String::new();
         loop {
-            let Some(c) = self.peek() else { return Err(self.fail("unterminated $' quote")) };
+            let Some(c) = self.peek() else {
+                return Err(self.fail("unterminated $' quote"));
+            };
 
             if c == '\'' {
                 self.advance(c);
@@ -269,15 +276,16 @@ impl<'a> Cursor<'a> {
             '"' => out.push('"'),
             '?' => out.push('?'),
             'c' => {
-                let control = self.peek().ok_or_else(|| self.fail(r"\c with nothing after it"))?;
+                let control = self
+                    .peek()
+                    .ok_or_else(|| self.fail(r"\c with nothing after it"))?;
 
                 self.advance(control);
                 out.push(((control as u32) & 0x1F) as u8 as char);
             }
             'x' => {
                 let digits = self.hex(2);
-                let byte = u8::from_str_radix(&digits, 16)
-                    .map_err(|_| self.fail(r"\x wants one or two hex digits"))?;
+                let byte = u8::from_str_radix(&digits, 16).map_err(|_| self.fail(r"\x wants one or two hex digits"))?;
 
                 out.push(byte as char);
             }
@@ -297,8 +305,11 @@ impl<'a> Cursor<'a> {
 
                 // Three octal digits reach 511. Bash prints no escape above
                 // `\377`, so a wider one is not its output.
-                let byte = u8::from_str_radix(&octal, 8)
-                    .map_err(|_| self.fail(format!(r"octal escape \{octal} is above \377")))?;
+                let byte = u8::from_str_radix(&octal, 8).map_err(|_| {
+                    self.fail(format!(
+                        r"octal escape \{octal} is above \377"
+                    ))
+                })?;
 
                 out.push(byte as char);
             }
@@ -312,8 +323,7 @@ impl<'a> Cursor<'a> {
 
     fn unicode(&mut self, width: usize, out: &mut String) -> Result<(), ParseError> {
         let digits = self.hex(width);
-        let point = u32::from_str_radix(&digits, 16)
-            .map_err(|_| self.fail("a unicode escape wants hex digits"))?;
+        let point = u32::from_str_radix(&digits, 16).map_err(|_| self.fail("a unicode escape wants hex digits"))?;
 
         out.push(char::from_u32(point).ok_or_else(|| self.fail("not a Unicode scalar value"))?);
         Ok(())
@@ -385,18 +395,21 @@ mod tests {
     fn a_grammar_over_other_syntax_builds_on_the_word_rules() {
         const STOPS: &[char] = &['=', ';', ' '];
 
-        let settings = parse_with(r#"a='one two';b=$'x\ty';c=bare\ word"#, |c| {
-            let mut out = Vec::new();
-            loop {
-                c.ws0();
-                let key = c.word(STOPS)?;
-                c.lit("=")?;
-                out.push((key, c.word(STOPS)?));
-                if !c.eat(";") {
-                    return Ok(out);
+        let settings = parse_with(
+            r#"a='one two';b=$'x\ty';c=bare\ word"#,
+            |c| {
+                let mut out = Vec::new();
+                loop {
+                    c.ws0();
+                    let key = c.word(STOPS)?;
+                    c.lit("=")?;
+                    out.push((key, c.word(STOPS)?));
+                    if !c.eat(";") {
+                        return Ok(out);
+                    }
                 }
-            }
-        })
+            },
+        )
         .unwrap();
 
         assert_eq!(
@@ -414,7 +427,10 @@ mod tests {
         let failed = parse_with("abc def", |c| c.word(&[' '])).expect_err("trailing input");
 
         assert_eq!(failed.at, 3);
-        assert!(failed.message.contains("trailing"), "{failed}");
+        assert!(
+            failed.message.contains("trailing"),
+            "{failed}"
+        );
     }
 
     /// An offset is where the parse actually stopped, not where it started.
@@ -427,13 +443,22 @@ mod tests {
         })
         .expect_err("unterminated");
 
-        assert_eq!(failed.at, 6, "the end of the input, inside the open quote");
-        assert!(failed.message.contains("unterminated"), "{failed}");
+        assert_eq!(
+            failed.at, 6,
+            "the end of the input, inside the open quote"
+        );
+        assert!(
+            failed.message.contains("unterminated"),
+            "{failed}"
+        );
     }
 
     /// An octal escape takes at most three digits, so a fourth is text.
     #[test]
     fn an_octal_escape_leaves_what_it_does_not_take() {
-        assert_eq!(parse_with(r"$'\1234'", |c| c.word(&[])).unwrap(), "\u{53}4");
+        assert_eq!(
+            parse_with(r"$'\1234'", |c| c.word(&[])).unwrap(),
+            "\u{53}4"
+        );
     }
 }

@@ -50,7 +50,12 @@ impl Schema {
 impl BashVal {
     /// One flat row of words.
     pub fn row(words: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self::Arr(words.into_iter().map(|word| Self::Str(word.into())).collect())
+        Self::Arr(
+            words
+                .into_iter()
+                .map(|word| Self::Str(word.into()))
+                .collect(),
+        )
     }
 
     /// The words of a one-dimensional value; `None` if it is any other shape.
@@ -76,7 +81,11 @@ impl BashVal {
 
 /// The depth said one word and there were others.
 fn scalar_expected(words: &[String]) -> ParseError {
-    ParseError::new(&words.join(" "), 0, format!("expected one word, got {}", words.len()))
+    ParseError::new(
+        &words.join(" "),
+        0,
+        format!("expected one word, got {}", words.len()),
+    )
 }
 
 pub trait BashCodec {
@@ -184,7 +193,14 @@ impl BashCodec for LinkedArr {
             Schema::Arr(_) => {
                 let (val, consumed) = parse_body(words, schema)?;
                 if consumed != words.len() {
-                    return Err(ParseError::new(&words.join(" "), 0, format!("trailing words: consumed {consumed} of {}", words.len())));
+                    return Err(ParseError::new(
+                        &words.join(" "),
+                        0,
+                        format!(
+                            "trailing words: consumed {consumed} of {}",
+                            words.len()
+                        ),
+                    ));
                 }
                 Ok(val)
             }
@@ -196,7 +212,11 @@ fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), Par
     let Schema::Arr(inner) = schema else {
         return match words.first() {
             Some(word) => Ok((BashVal::Str(word.clone()), 1)),
-            None => Err(ParseError::new("", 0, "a scalar position with no word")),
+            None => Err(ParseError::new(
+                "",
+                0,
+                "a scalar position with no word",
+            )),
         };
     };
 
@@ -212,18 +232,39 @@ fn parse_body(words: &[String], schema: &Schema) -> Result<(BashVal, usize), Par
         }
 
         let width: usize = words[at].parse().map_err(|_| {
-            ParseError::new(&words.join(" "), 0, format!("length prefix not numeric at pos {at}: {:?}", words[at]))
+            ParseError::new(
+                &words.join(" "),
+                0,
+                format!(
+                    "length prefix not numeric at pos {at}: {:?}",
+                    words[at]
+                ),
+            )
         })?;
         at += 1;
 
         let end = at + width;
         if end > words.len() {
-            return Err(ParseError::new(&words.join(" "), 0, format!("group claims {width} words; only {} available", words.len() - at)));
+            return Err(ParseError::new(
+                &words.join(" "),
+                0,
+                format!(
+                    "group claims {width} words; only {} available",
+                    words.len() - at
+                ),
+            ));
         }
 
         let (item, consumed) = parse_body(&words[at..end], inner)?;
         if consumed != end - at {
-            return Err(ParseError::new(&words.join(" "), 0, format!("nested group: consumed {consumed} of {} body words", end - at)));
+            return Err(ParseError::new(
+                &words.join(" "),
+                0,
+                format!(
+                    "nested group: consumed {consumed} of {} body words",
+                    end - at
+                ),
+            ));
         }
         items.push(item);
         at = end;
@@ -246,15 +287,32 @@ mod tests {
         ];
 
         let text = QuotedNest.emit_literal(&BashVal::Arr(
-            rows.iter().map(|row| BashVal::row(row.iter().cloned())).collect(),
+            rows.iter()
+                .map(|row| BashVal::row(row.iter().cloned()))
+                .collect(),
         ));
         let outer = crate::parse_array(&text).unwrap();
 
-        assert_eq!(outer.len(), 3, "three words at the outer level, one per row");
-        assert_eq!(outer[0], "('AspectRequire' 'env' 'mod a')", "each one an array literal");
-        assert_eq!(crate::parse_array(&outer[0]).unwrap(), rows[0], "which reads back on its own");
+        assert_eq!(
+            outer.len(),
+            3,
+            "three words at the outer level, one per row"
+        );
+        assert_eq!(
+            outer[0], "('AspectRequire' 'env' 'mod a')",
+            "each one an array literal"
+        );
+        assert_eq!(
+            crate::parse_array(&outer[0]).unwrap(),
+            rows[0],
+            "which reads back on its own"
+        );
 
-        assert_eq!(QuotedNest.rows(&text).unwrap(), rows, "or in one step");
+        assert_eq!(
+            QuotedNest.rows(&text).unwrap(),
+            rows,
+            "or in one step"
+        );
     }
     use super::*;
 
@@ -274,24 +332,47 @@ mod tests {
     /// back through the schema that says how deep to look.
     #[test]
     fn quoted_nest_wraps_a_level_per_dimension() {
-        let two_d = arr(vec![row(&["a", "b"]), row(&["c", "d", "e"])]);
+        let two_d = arr(vec![
+            row(&["a", "b"]),
+            row(&["c", "d", "e"]),
+        ]);
 
-        assert_eq!(QuotedNest.emit(&two_d), words(&["('a' 'b')", "('c' 'd' 'e')"]));
-        assert_eq!(QuotedNest.parse(&QuotedNest.emit(&two_d), &Schema::n_d(2)).unwrap(), two_d);
+        assert_eq!(
+            QuotedNest.emit(&two_d),
+            words(&["('a' 'b')", "('c' 'd' 'e')"])
+        );
+        assert_eq!(
+            QuotedNest
+                .parse(
+                    &QuotedNest.emit(&two_d),
+                    &Schema::n_d(2)
+                )
+                .unwrap(),
+            two_d
+        );
     }
 
     #[test]
     fn linked_arr_prefixes_each_group_with_its_width() {
         assert_eq!(
-            LinkedArr.emit(&arr(vec![row(&["a", "b"]), row(&["c", "d", "e"])])),
+            LinkedArr.emit(&arr(vec![
+                row(&["a", "b"]),
+                row(&["c", "d", "e"])
+            ])),
             words(&["2", "a", "b", "3", "c", "d", "e"])
         );
         assert_eq!(
-            LinkedArr.emit(&arr(vec![arr(vec![row(&["a", "b"]), row(&["c"])])])),
+            LinkedArr.emit(&arr(vec![arr(vec![
+                row(&["a", "b"]),
+                row(&["c"])
+            ])])),
             words(&["5", "2", "a", "b", "1", "c"])
         );
         assert_eq!(
-            LinkedArr.emit(&arr(vec![arr(vec![row(&["a", "b"])]), arr(vec![row(&["c"])])])),
+            LinkedArr.emit(&arr(vec![
+                arr(vec![row(&["a", "b"])]),
+                arr(vec![row(&["c"])])
+            ])),
             words(&["3", "2", "a", "b", "2", "1", "c"])
         );
     }
@@ -300,13 +381,23 @@ mod tests {
     /// to look — the text alone cannot, since every level is just words.
     #[test]
     fn quoted_nest_round_trips_at_three_dimensions() {
-        let three_d =
-            arr(vec![arr(vec![row(&["a", "b"]), row(&["c"])]), arr(vec![row(&["d", "e"])])]);
+        let three_d = arr(vec![
+            arr(vec![row(&["a", "b"]), row(&["c"])]),
+            arr(vec![row(&["d", "e"])]),
+        ]);
         let text = QuotedNest.emit_literal(&three_d);
 
-        assert_eq!(QuotedNest.parse_literal(&text, &Schema::n_d(3)).unwrap(), three_d);
         assert_eq!(
-            QuotedNest.parse_literal(&text, &Schema::n_d(2)).unwrap().rows().unwrap().len(),
+            QuotedNest.parse_literal(&text, &Schema::n_d(3)).unwrap(),
+            three_d
+        );
+        assert_eq!(
+            QuotedNest
+                .parse_literal(&text, &Schema::n_d(2))
+                .unwrap()
+                .rows()
+                .unwrap()
+                .len(),
             2,
             "read one level shallower it is still two rows, of one word each"
         );
@@ -314,9 +405,19 @@ mod tests {
 
     #[test]
     fn linked_arr_round_trips_at_three_dimensions() {
-        let three_d =
-            arr(vec![arr(vec![row(&["a", "b"]), row(&["c"])]), arr(vec![row(&["d", "e"])])]);
+        let three_d = arr(vec![
+            arr(vec![row(&["a", "b"]), row(&["c"])]),
+            arr(vec![row(&["d", "e"])]),
+        ]);
 
-        assert_eq!(LinkedArr.parse(&LinkedArr.emit(&three_d), &Schema::n_d(3)).unwrap(), three_d);
+        assert_eq!(
+            LinkedArr
+                .parse(
+                    &LinkedArr.emit(&three_d),
+                    &Schema::n_d(3)
+                )
+                .unwrap(),
+            three_d
+        );
     }
 }

@@ -11,14 +11,21 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn new(input: &str, at: usize, message: impl Into<String>) -> Self {
-        Self { message: message.into(), at, snippet: around(input, at) }
+        Self {
+            message: message.into(),
+            at,
+            snippet: around(input, at),
+        }
     }
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "bash value parse error at byte {}: {} — near {:?}",
-            self.at, self.message, self.snippet)
+        write!(
+            f,
+            "bash value parse error at byte {}: {} — near {:?}",
+            self.at, self.message, self.snippet
+        )
     }
 }
 
