@@ -1,8 +1,8 @@
 //! The forms bash prints a value in, and nothing else.
 //!
 //! Each is strict: it accepts what bash itself writes and refuses the rest.
-//! Where a word begins and ends is [`quoting`](super::quoting)'s; this is what
-//! surrounds one.
+//! Where a word begins and ends is decided in [`quoting`](super::quoting);
+//! this is what surrounds one.
 //!
 //! | | |
 //! |---|---|
