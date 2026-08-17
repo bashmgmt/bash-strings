@@ -8,8 +8,8 @@
 //!   layer per level.
 //!
 //! - [`LinkedArr`] — one flat word stream, each group prefixed by its width:
-//!   `[[a,b],[c]] → [2, a, b, 1, c]`. The shape `glue-core`'s bash-side
-//!   walker reads.
+//!   `[[a,b],[c]] → [2, a, b, 1, c]`. A bash-side walker reads it by
+//!   taking a width and shifting that many words, with no parser.
 //!
 //! Emitting takes the depth from the value; parsing takes it from a `Schema`,
 //! which is what the text alone does not say. Scalar leaves are raw strings —
@@ -161,8 +161,8 @@ impl BashCodec for QuotedNest {
 /// | `[[[a,b],[c]]]` | `5 2 a b 1 c` |
 /// | `[[[a,b]],[[c]]]` | `3 2 a b 2 1 c` |
 ///
-/// Matches `glue-core/src/data/linked_arr.bash::LinkedArr__Add` /
-/// `LinkedArr__Call`.
+/// The width prefix is what lets bash walk the stream with `shift`
+/// alone, so a reader needs no quoting rules of its own.
 pub struct LinkedArr;
 
 impl BashCodec for LinkedArr {

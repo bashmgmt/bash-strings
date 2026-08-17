@@ -4,11 +4,10 @@
 
 The Rust side of the format bash already has.
 
-**This crate stands on its own.** It depends on nothing else in the
-workspace, and three otherwise-disconnected consumers use it: `bash-interop`
-for the wire, `bashcap` for captured variables, and `mb_resolver` for
-`dependencies.list` and the aspect grammar. Its surface is what parsing and
-formatting bash values needs — not what any one caller happens to reach for.
+The crate stands on its own: it depends on `indexmap` and nothing else, and
+its surface is what parsing and formatting bash values needs, rather than
+what any one caller happens to reach for. `bash-interop` uses it for the
+wire and `bashcap` for captured variables, and the two share no other code.
 
 Every module inside is private. The re-export list in `lib.rs` is the API,
 so nothing is reachable only by reaching through, and no dependency of the
@@ -24,8 +23,8 @@ any depth, either encoding  BashVal + Schema + BashCodec
 a grammar over other syntax Cursor + parse_with
 ```
 
-Each is a public entry point. A helper with a sane default never closes off the
-general form underneath it.
+Each level is a public entry point, and a helper with a default never closes
+off the general form underneath it.
 
 ## Level 1 — the shapes bash prints
 
@@ -54,12 +53,12 @@ pub fn emit_indexed(m: &IndexMap<usize, String>) -> String;
 pub fn emit_assoc(m: &IndexMap<String, String>)  -> String;
 ```
 
-**An array literal is the shape everything else travels in.** A wire frame is
-one, an answer is one, and each section of a bashcap message is one. It is
-spelled once on each side — `emit_array` puts the parentheses on, `inside`
-takes them off — and `parse_array` takes no codec, because at one dimension
-`QuotedNest` and `LinkedArr` write the same text. That equality is asserted,
-not assumed.
+An array literal is the shape everything else travels in. A wire frame is one,
+an answer is one, and each section of a bashcap message is one. It is spelled
+once on each side, with `emit_array` putting the parentheses on and `inside`
+taking them off. `parse_array` takes no codec, because at one dimension
+`QuotedNest` and `LinkedArr` write the same text, and a test asserts that
+equality.
 
 Parsers accept bash's canonical output and nothing else; emitters produce
 canonical single-quoted form. `$'…'` ANSI-C strings are accepted on input,
@@ -78,15 +77,15 @@ or a depth that wanted one word and found several.
 ### Where the forms stop
 
 Bash's output is the whole of what is accepted, and two places in it are wider
-than the type behind them. Both refuse rather than wrap:
+than the type behind them. Both refuse rather than wrap.
 
-- **An octal escape is a byte.** `$'\377'` is the widest bash prints — that is
-  how a byte it cannot show crosses the wire, as ASCII, keeping the frame
-  valid UTF-8. Three octal digits reach 511, so `$'\400'` and above are not
-  bash's output and are an error. An escape takes at most three digits, so a
-  fourth is text.
-- **A subscript is a machine integer.** `[0]`, `[5]`, up to `usize::MAX`. One
-  too wide to be one was never printed by bash.
+An octal escape is a byte. `$'\377'` is the widest bash prints, which is how a
+byte it cannot show crosses the wire as ASCII, keeping the frame valid UTF-8.
+Three octal digits reach 511, so `$'\400'` and above are not bash's output and
+are an error. An escape takes at most three digits, so a fourth is text.
+
+A subscript is a machine integer: `[0]`, `[5]`, up to `usize::MAX`. One too
+wide to be one was never printed by bash.
 
 The parsers are the crate's only reader of text it did not write, so the
 boundary is a `ParseError` at each of them and never a panic.
@@ -119,9 +118,9 @@ pub trait BashCodec {
 }
 ```
 
-A bash array is flat, so nesting is encoded textually and the depth is carried
-by a `Schema` alongside the data. This is how a value with structure is
-transported through a shape that has none.
+A bash array is flat, so nesting is encoded textually and the depth travels
+beside the data in a `Schema`. That is how a value with structure crosses a
+shape that has none.
 
 `emit` takes no `Schema`: the value's own depth decides the encoding, so there
 is nothing to disagree with and nothing to fail. `parse` needs one, because
@@ -134,7 +133,7 @@ strings. One dimension has no such method: `parse_array` covers it for both
 codecs. `parse_rows` is `QuotedNest::rows` under a name, and `LinkedArr.rows`
 is how a caller says otherwise.
 
-**`QuotedNest`** makes each inner array one quoted word at the outer level:
+`QuotedNest` makes each inner array one quoted word at the outer level:
 
 ```
 [[a, b], [c]]   →   ("('a' 'b')" "('c')")
@@ -144,20 +143,20 @@ Bash reconstructs a level with `declare -a inner="$word"`, its own parser, and
 Rust with `parse_array`. Depth costs one parse per level. This is what the rig
 uses.
 
-**`LinkedArr`** prefixes each group with its width:
+`LinkedArr` prefixes each group with its width:
 
 ```
 [[a, b], [c]]   →   (2 a b 1 c)
 ```
 
-Denser, and it matches `glue-core/src/data/linked_arr.bash` on the ManageBash
-side. `mb_resolver`'s resolver CLI emits it.
+Denser, and cheap to walk from bash, where reading a width and shifting that
+many words needs no parser at all.
 
 ## Level 3 — a grammar over other syntax
 
-`quoting.rs` knows how bash spells **one word** and nothing above that. Where a
-word *ends* belongs to the caller, so a grammar over unrelated syntax passes
-its own stop characters and gets every quoting form for free.
+`quoting.rs` knows how bash spells one word and nothing above that. Where a
+word ends belongs to the caller, so a grammar over unrelated syntax passes its
+own stop characters and gets every quoting form for free.
 
 ```rust
 pub struct Cursor<'a>;
@@ -186,9 +185,9 @@ pub fn parse_with<T>(
 none can quietly match a prefix. A refusal carries the offset it reached,
 constructed where the parse stopped.
 
-`mb_resolver`'s aspect grammar is the worked instance: `Name(key=value,
-key2='two words')` is not a bash value, but each parameter is a bash word, so
-it declares two stop sets and writes twenty lines.
+A parameter syntax like `Name(key=value, key2='two words')` is the worked
+instance: it is not a bash value, but each parameter is a bash word, so the
+grammar declares two stop sets and comes to twenty lines.
 
 A word is any of the quoting forms, and adjacent ones concatenate — `a"b"c'd'`
 is one word, `abcd`:
@@ -203,14 +202,14 @@ is one word, `abcd`:
 
 ## No parser dependency in the surface
 
-The layer has no third-party parsing dependency. What one provided was literal
-matching, a character-class take, and an error model whose backtrack/cut
-distinction nothing here discriminated on — every choice is a `starts_with`,
-and the one site that could tell the two apart treated them alike. `Cursor` is
-that, spelled directly.
+The layer has no third-party parsing dependency. What one would provide here is
+literal matching, a character-class take, and an error model whose
+backtrack-versus-cut distinction nothing in this crate discriminates on: every
+choice is a `starts_with`, and the one site that could tell the two apart
+treats them alike. `Cursor` is that, spelled directly.
 
 ## See also
 
-- `bash-interop/docs/wire.md#what-a-line-is` — the one message format, built on array literals
-- `bashcap/docs/bashcap.md#the-decoder` — the deepest use, at `n_d(2)`
-- `bash-interop/docs/scoping.md` — where the bash half of all this binds its names
+- [bash-interop: wire](https://bashmgmt.github.io/bash-interop/wire.html#what-a-line-is) — the one message format, built on array literals
+- [bashcap: bashcap](https://bashmgmt.github.io/bashcap/bashcap.html#the-decoder) — the deepest use, at `n_d(2)`
+- [bash-interop: scoping](https://bashmgmt.github.io/bash-interop/scoping.html) — where the bash half of all this binds its names

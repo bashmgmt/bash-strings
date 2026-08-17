@@ -40,8 +40,8 @@
 //!   one layer per level. This is what `array` and `rows` above use.
 //!
 //! - [`LinkedArr`] — one flat word stream, each group prefixed by its width:
-//!   `[[a,b],[c]]` → `[2, a, b, 1, c]`. The shape `glue-core`'s bash-side
-//!   walker reads.
+//!   `[[a,b],[c]]` → `[2, a, b, 1, c]`. A bash-side walker reads it by
+//!   taking a width and shifting that many words, with no parser.
 //!
 //! ```
 //! use bash_strings::{BashCodec, BashVal, LinkedArr, ParseError, Schema};
